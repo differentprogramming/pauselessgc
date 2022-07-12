@@ -1,6 +1,6 @@
 # pauselessgc
 
-A precise garbage collector for C++ that supports multiple mutating threads and even multiple collecting threads.  Threads have to sync at GC phase changes but other than that, threads are never stopped. 
+A precise garbage collector for C++ that supports multiple mutating threads.  Threads have to sync at GC phase changes but other than that, threads are never stopped. 
 
 In order to use it, you have to create types that can tell the collector how many pointers they contain and supply them one by one to be traced.   There is no support for resurrecting any objects on finalization. 
 
@@ -8,11 +8,11 @@ There are two pointer types, one goes inside of collectable objects.  The other 
 
 There are no limitations on sharing live objects between threads.  Like Java or .net the collector has no problem with collecting objects that are being contended on from multiple threads. 
 
-The basic design is that each pointer is actually a pair of pointers, and when collection is not going on, each store to a pointer is actually an atomic, but not expensive, store to two pointers.  When collection starts, the stores are only to one of the two pointers and the other pointer is considered part of a snapshot that the collector follows.  When collection is done, stores go back to being to both pointers, meanwhile the collection threads are restoring the snapshot for pointers that were mutated during the collection.  Doing this requires a things that aren't portably available in C++, and which aren't even available on all processors.  A 128 bit atomic store and load (without a fence) and a 128 bit atomic compare exchange. 
+The basic design is that each pointer is actually a pair of pointers, and when collection is not going on, each store to a pointer is actually an atomic, but not expensive, store to two pointers.  When collection starts, the stores are only to one of the two pointers and the other pointer is considered part of a snapshot that the collector follows.  When collection is done, stores go back to being to both pointers, meanwhile the collection threads are restoring the snapshot for pointers that were mutated during the collection.  Doing this requires things that aren't portably available in C++ and which aren't even available on all processors.  A 128 bit atomic store and load (without a fence) and a 128 bit atomic compare exchange are needed. 
 
 Everything happens in-place, no compaction ever takes place. 
 
-Mutating threads have to periodically go through safe-points in order to flush caches and change the write barrier in sync. When a mutating thread makes a blocking call, it should opt out of mutating before the call and opt back in afterwards so it doesn't hold up the other threads or the garbage collector.  There are RAII objects to automate that.  Another result of this design is that may be a bad idea to have more threads active than you have hyperthreads available on the processor, otherwise syncing will be slower.  It does yield threads while waiting in order to speed it up in that . 
+Mutating threads have to periodically go through safe-points in order to flush caches, change the write barrier and a few other small tasks in sync. When a mutating thread makes a blocking call, it should opt out of mutating before the call and opt back in afterwards so it doesn't hold up the other threads or the garbage collector.  There are RAII objects to automate that.  Another result of this design is that may be a bad idea to have more threads active than you have hyperthreads available on the processor, otherwise syncing will be slower.  It does yield threads while waiting in order to speed it up in that . 
 
 
 # I believe this is a novel garbage collector.
