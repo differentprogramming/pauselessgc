@@ -1,4 +1,6 @@
 #include "Collectable.h"
 
-thread_local RootLetterBase* RootSentinal;
-
+namespace GC {
+	ScanLists* ScanListsByThread[MAX_COLLECTED_THREADS];
+	int ActiveIndex;
+}

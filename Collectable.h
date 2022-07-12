@@ -56,8 +56,13 @@ InstancePtr<T> reinterpret_pointer_cast(const InstancePtr<U>& v) noexcept
 class Collectable;
 struct RootLetterBase;
 namespace GC {
-    extern Collectable* ActiveCollectables[MAX_COLLECTED_THREADS*2];
-    extern thread_local RootLetterBase* ActiveRoots[MAX_COLLECTED_THREADS*2];
+    struct ScanLists
+    {
+        Collectable* collectables[2];
+        RootLetterBase* roots[2];
+    };
+
+    extern ScanLists* ScanListsByThread[MAX_COLLECTED_THREADS];
     extern int ActiveIndex;
 }
 
@@ -80,7 +85,7 @@ struct RootLetterBase
 
 inline RootLetterBase::RootLetterBase()
 {
-    RootLetterBase* t = GC::ActiveRoots[GC::MyThreadNumber*2+ GC::ActiveIndex];
+    RootLetterBase* t = GC::ScanListsByThread[GC::MyThreadNumber]->roots[GC::ActiveIndex];
     prev = t;
     next = t->next;
     next->prev = this;
@@ -171,6 +176,8 @@ void InstancePtr<T>::operator = (const Value<Y>& o) {
 
 class Collectable {
 protected:
+    friend void GC::merge_collected();
+
     enum Sentinal { SENTINAL };
     //when not tracing contains self index
     //when tracing points back to where we came from or 0 if that was a root
@@ -196,7 +203,7 @@ public:
 
     virtual void Finalize() {}; //destroy when collected
     Collectable() {
-        Collectable *t = GC::ActiveCollectables[GC::MyThreadNumber * 2 + GC::ActiveIndex];
+        Collectable *t = GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex];
         sweep_next = t;
         sweep_prev = t->sweep_prev;
         t->sweep_prev = sweep_prev->sweep_next = this;

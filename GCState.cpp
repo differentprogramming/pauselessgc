@@ -83,11 +83,30 @@ namespace GC {
     extern int ActiveIndex;
     */
         for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
-            Collectable* active_c = GC::ActiveCollectables[GC::MyThreadNumber * 2 + GC::ActiveIndex];
-            Collectable* snapshot_c = GC::ActiveCollectables[GC::MyThreadNumber * 2 + (GC::ActiveIndex^1)];
+            if (nullptr == GC::ScanListsByThread[GC::MyThreadNumber]) continue;
+            Collectable* active_c = GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex];
+            Collectable* snapshot_c = GC::ScanListsByThread[GC::MyThreadNumber]->collectables[(GC::ActiveIndex^1)];
+            if (snapshot_c->sweep_next != snapshot_c)
+            {
+                snapshot_c->sweep_next->sweep_prev = active_c;
+                snapshot_c->sweep_prev->sweep_next = active_c->sweep_next;
+                active_c->sweep_next->sweep_prev = snapshot_c->sweep_prev;
+                active_c->sweep_next = snapshot_c->sweep_next;
+                snapshot_c->sweep_next = snapshot_c->sweep_prev = snapshot_c;
+
+            }
             //{}{}{} finish
-            RootLetterBase* active_r = GC::ActiveRoots[GC::MyThreadNumber * 2 + GC::ActiveIndex];
-            RootLetterBase* snapshot_r = GC::ActiveRoots[GC::MyThreadNumber * 2 + (GC::ActiveIndex ^ 1)];
+            RootLetterBase* active_r = GC::ScanListsByThread[GC::MyThreadNumber]->roots[GC::ActiveIndex];
+            RootLetterBase* snapshot_r = GC::ScanListsByThread[GC::MyThreadNumber]->roots[(GC::ActiveIndex ^ 1)];
+            if (snapshot_r->next != snapshot_r)
+            {
+                snapshot_r->next->prev = active_r;
+                snapshot_r->prev->next = active_r->next;
+                active_r->next->prev = snapshot_r->prev;
+                active_r->next = snapshot_r->next;
+                snapshot_r->next = snapshot_r->prev = snapshot_r;
+
+            }
         }
     }
 
@@ -141,7 +160,7 @@ namespace GC {
             to.state.threads_in_collection++;//stop everyone till I'm done
             to.state.phase = PhaseEnum::RESTORING_SNAPSHOT;
         } while (!compare_set_state(&gc, to));
-        while (true) {
+  //      while (true) {
             if (to.state.threads_in_collection == 1) {
                 merge_collected();
                 do {
@@ -150,13 +169,14 @@ namespace GC {
                 } while (!compare_set_state(&gc, to));
                 return;
 #ifdef _WIN32
-            SwitchToThread();
+                SwitchToThread();
 #else
-            sched_yield();
+                sched_yield();
 #endif 
-            StateStoreType to = get_state();
-        }
-        if (CombinedThread && ThreadState != ThreadStateEnum::NOT_MUTATING)  SetThreadState( ThreadStateEnum::OUT_OF_COLLECTION);
+                StateStoreType to = get_state();
+            }
+            if (CombinedThread && ThreadState != ThreadStateEnum::NOT_MUTATING)  SetThreadState(ThreadStateEnum::OUT_OF_COLLECTION);
+//        }{}{}{}
     }
     void _end_sweep()
     {
