@@ -78,7 +78,7 @@ namespace GC {
     extern thread_local ThreadStateEnum ThreadState;
     extern thread_local int NotMutatingCount;
     extern thread_local int MyThreadNumber;
-    extern thread_local int AcknowledgedSweep;
+
 
     extern std::atomic_uint32_t ThreadsInGC;
 

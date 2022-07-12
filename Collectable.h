@@ -53,6 +53,15 @@ InstancePtr<T> reinterpret_pointer_cast(const InstancePtr<U>& v) noexcept
     return InstancePtr<T>(reinterpret_cast<T*>(v.get()));
 }
 
+class Collectable;
+struct RootLetterBase;
+namespace GC {
+    extern Collectable* ActiveCollectables[MAX_COLLECTED_THREADS*2];
+    extern thread_local RootLetterBase* ActiveRoots[MAX_COLLECTED_THREADS*2];
+    extern int ActiveIndex;
+}
+
+
 struct RootLetterBase
 {
     enum Sentinal { SENTINAL };
@@ -69,14 +78,13 @@ struct RootLetterBase
     }
 };
 
-extern thread_local RootLetterBase* RootSentinal;
-
 inline RootLetterBase::RootLetterBase()
 {
-    prev = RootSentinal;
-    next = RootSentinal->next;
-    RootSentinal->next->prev = this;
-    RootSentinal->next = this;
+    RootLetterBase* t = GC::ActiveRoots[GC::MyThreadNumber*2+ GC::ActiveIndex];
+    prev = t;
+    next = t->next;
+    next->prev = this;
+    t->next = this;
 }
 
 template <typename T>
@@ -162,6 +170,8 @@ void InstancePtr<T>::operator = (const Value<Y>& o) {
 }
 
 class Collectable {
+protected:
+    enum Sentinal { SENTINAL };
     //when not tracing contains self index
     //when tracing points back to where we came from or 0 if that was a root
     //when in a free list points to the next free element as an unbiased index into this block
@@ -171,6 +181,10 @@ class Collectable {
     uint32_t back_ptr_from_counter;//came from nth snapshot ptr
     std::atomic_bool marked;
     virtual ~Collectable() {}
+    Collectable(Sentinal) {
+        sweep_prev = sweep_next = this;
+    }
+
 public:
 
     virtual int num_ptrs_in_snapshot() = 0;
@@ -181,4 +195,23 @@ public:
     virtual Collectable* index_into_collectable_ptrs(int num) = 0;
 
     virtual void Finalize() {}; //destroy when collected
+    Collectable() {
+        Collectable *t = GC::ActiveCollectables[GC::MyThreadNumber * 2 + GC::ActiveIndex];
+        sweep_next = t;
+        sweep_prev = t->sweep_prev;
+        t->sweep_prev = sweep_prev->sweep_next = this;
+
+    }
+};
+
+class CollectableSentinal : public Collectable
+{
+public:
+    CollectableSentinal():Collectable(SENTINAL) {}
+    virtual int num_ptrs_in_snapshot() { return 0; }
+    virtual GC::SnapPtr* index_into_snapshot_ptrs(int num) { return nullptr; };
+    //not snapshot, includes ones that could be null because they're live
+    virtual int total_collectable_ptrs() { return 0; }
+    virtual size_t my_size() { return sizeof(*this); }
+    virtual Collectable* index_into_collectable_ptrs(int num) { return nullptr; }
 };

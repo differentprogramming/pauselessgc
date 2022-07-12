@@ -1,4 +1,4 @@
-#include "GCState.h"
+#include "Collectable.h"
 #include <cassert>
 #ifdef _WIN32
 #include <Processthreadsapi.h>
@@ -75,6 +75,22 @@ namespace GC {
 
     std::atomic_uint32_t ThreadsInGC;
 
+    void merge_collected()
+    {
+        /*
+    extern Collectable* ActiveCollectables[MAX_COLLECTED_THREADS*2];
+    extern thread_local RootLetterBase* ActiveRoots[MAX_COLLECTED_THREADS*2];
+    extern int ActiveIndex;
+    */
+        for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
+            Collectable* active_c = GC::ActiveCollectables[GC::MyThreadNumber * 2 + GC::ActiveIndex];
+            Collectable* snapshot_c = GC::ActiveCollectables[GC::MyThreadNumber * 2 + (GC::ActiveIndex^1)];
+            //{}{}{} finish
+            RootLetterBase* active_r = GC::ActiveRoots[GC::MyThreadNumber * 2 + GC::ActiveIndex];
+            RootLetterBase* snapshot_r = GC::ActiveRoots[GC::MyThreadNumber * 2 + (GC::ActiveIndex ^ 1)];
+        }
+    }
+
     void init()
     {
         State.state.threads_not_mutating = 0;
@@ -93,10 +109,18 @@ namespace GC {
         do {
             to = gc;
             to.state.phase = PhaseEnum::COLLECTING;
+            to.state.threads_out_of_collection++;//stop everyone till I'm done
         } while(!compare_set_state(&gc, to));
 
         while (true) {
-            if (to.state.threads_out_of_collection == 0) return;
+            if (to.state.threads_out_of_collection == 1) {
+                ActiveIndex ^= 1;
+                do {
+                    to = gc;
+                    to.state.threads_out_of_collection--;//release them
+                } while (!compare_set_state(&gc, to));
+                return;
+            }
 #ifdef _WIN32
             SwitchToThread();
 #else
@@ -114,10 +138,17 @@ namespace GC {
         StateStoreType to;
         do {
             to = gc;
+            to.state.threads_in_collection++;//stop everyone till I'm done
             to.state.phase = PhaseEnum::RESTORING_SNAPSHOT;
         } while (!compare_set_state(&gc, to));
         while (true) {
-            if (to.state.threads_in_collection == 0) return;
+            if (to.state.threads_in_collection == 1) {
+                merge_collected();
+                do {
+                    to = gc;
+                    to.state.threads_in_collection--;//release them
+                } while (!compare_set_state(&gc, to));
+                return;
 #ifdef _WIN32
             SwitchToThread();
 #else
@@ -275,6 +306,13 @@ namespace GC {
 
     };
 
+
+    //if syncing packages up object and root for collecting then it has to still happen even if a thread has opted out
+    //
+    //clearly the lists for both of these have to be visible to the GC without having to be explicitly passed.
+    //And handling the difference between live and snapshot lists has to be done entirely by the GC.
+    // 
+    //
     void thread_leave_mutation()
     {
         ++NotMutatingCount;
