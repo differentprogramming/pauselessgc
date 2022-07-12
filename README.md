@@ -1,4 +1,4 @@
-# portablegc
+# pauselessgc
 
 A precise garbage collector for C++ that supports multiple mutating threads and even multiple collecting threads.  Threads have to sync at GC phase changes but other than that, threads are never stopped. 
 
