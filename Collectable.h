@@ -3,13 +3,27 @@
 
 template <typename T>
 struct Value;
+class Collectable;
+
+class InstancePtrBase
+{
+protected:
+public:
+    GC::SnapPtr value;
+    Collectable* get_collectable() { return (Collectable *)GC::load(&value); }
+    void mark()
+    {
+        Collectable* s = get_collectable();
+        if (s != nullptr) s->mark();
+    }
+};
 
 template <typename T>
-class InstancePtr
+class InstancePtr : public InstancePtrBase
 {
     void double_ptr_store(T* v) { GC::write_barrier(&value, (void*)v) }
 public:
-    GC::SnapPtr value;
+
     T* get() const { return (T*)GC::load(&value); }
     void store(T* v) { GC::write_barrier(&value, (void*)v) }
 
@@ -72,9 +86,12 @@ struct RootLetterBase
     enum Sentinal { SENTINAL };
     RootLetterBase* next;
     RootLetterBase* prev;
+    bool owned;
+    virtual GC::SnapPtr* double_ptr() { return nullptr; }
 
-    RootLetterBase(Sentinal) { next = prev = this; }
+    RootLetterBase(Sentinal): owned(true) { next = prev = this; }
     RootLetterBase();
+    virtual void mark() {}
     virtual ~RootLetterBase()
     {
 
@@ -83,7 +100,7 @@ struct RootLetterBase
     }
 };
 
-inline RootLetterBase::RootLetterBase()
+inline RootLetterBase::RootLetterBase():owned(true)
 {
     RootLetterBase* t = GC::ScanListsByThread[GC::MyThreadNumber]->roots[GC::ActiveIndex];
     prev = t;
@@ -96,6 +113,8 @@ template <typename T>
 struct RootLetter : public RootLetterBase
 {
     InstancePtr<T> value;
+    virtual GC::SnapPtr* double_ptr() { return &value->value; }
+    virtual void mark() { value->mark(); }
 
     RootLetter() {}
     RootLetter(T *v) :value(v){}
@@ -135,7 +154,7 @@ struct Value
     template <typename Y>
     Value (const InstancePtr<Y> &v) :var(new RootLetter<T>(v.get())) {}
     Value() :var(new RootLetter<T>){}
-
+    ~Value() { var->owned = false; }
 };
 
 template< class T, class U >
@@ -174,9 +193,19 @@ void InstancePtr<T>::operator = (const Value<Y>& o) {
     store(v.var->value.get());
 }
 
+namespace GC {
+    void merge_collected();
+    void _do_collection();
+    void _do_restore_snapshot(Collectable*, RootLetterBase*);
+    void _end_collection_start_restore_snapshot();
+}
+
 class Collectable {
 protected:
     friend void GC::merge_collected();
+    friend void GC::_do_collection();
+    friend void GC::_do_restore_snapshot(Collectable*, RootLetterBase*);
+    friend void GC::_end_collection_start_restore_snapshot();
 
     enum Sentinal { SENTINAL };
     //when not tracing contains self index
@@ -186,29 +215,64 @@ protected:
     Collectable* sweep_next;
     Collectable* sweep_prev;
     uint32_t back_ptr_from_counter;//came from nth snapshot ptr
-    std::atomic_bool marked;
-    virtual ~Collectable() {}
+    //std::atomic_bool marked;
+    bool marked; //only one collection thread
+    virtual ~Collectable() 
+    {
+        sweep_next->sweep_prev = sweep_prev;
+        sweep_prev->sweep_next = sweep_next;
+    }
     Collectable(Sentinal) {
         sweep_prev = sweep_next = this;
     }
 
 public:
-
-    virtual int num_ptrs_in_snapshot() = 0;
-    virtual GC::SnapPtr* index_into_snapshot_ptrs(int num) = 0;
-    //not snapshot, includes ones that could be null because they're live
-    virtual int total_collectable_ptrs() = 0;
-    virtual size_t my_size() = 0;
-    virtual Collectable* index_into_collectable_ptrs(int num) = 0;
-
-    virtual void Finalize() {}; //destroy when collected
-    Collectable() {
-        Collectable *t = GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex];
-        sweep_next = t;
-        sweep_prev = t->sweep_prev;
-        t->sweep_prev = sweep_prev->sweep_next = this;
-
+    void mark()
+    {
+        Collectable* n;
+        Collectable* c = this;
+        if (!c->marked) {
+            c->marked = true;
+            int t = total_instance_vars() - 1;
+            for (;;) {
+            outer:
+                do {
+                    if (t >= 0) {
+                        n = c->index_into_instance_vars(t)->get_collectable();
+                        if (n != nullptr && !n->marked) {
+                            n->marked = true;
+                            n->back_ptr_from_counter = t;
+                            n->back_ptr = c;
+                            c = n;
+                            t = c->total_instance_vars()-1;
+                            goto outer;
+                        }
+                    }
+                    --t;
+                } while (n == nullptr);
+            }
+            n = c;
+            c = c->back_ptr;
+            n->back_ptr = nullptr;
+            t = back_ptr_from_counter - 1;
+            if (c == nullptr) return;
+        }
     }
+    //virtual int num_ptrs_in_snapshot() = 0;
+    //virtual GC::SnapPtr* index_into_snapshot_ptrs(int num) = 0;
+    //not snapshot, includes ones that could be null because they're live
+    virtual int total_instance_vars() = 0;
+    virtual size_t my_size() = 0;
+    virtual InstancePtrBase* index_into_instance_vars(int num) = 0;
+
+    Collectable() {
+        Collectable* t = GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex];
+        sweep_prev = t;
+        sweep_next = t->sweep_next;
+        sweep_next->sweep_prev = this;
+        t->sweep_next = this;
+    }
+
 };
 
 class CollectableSentinal : public Collectable

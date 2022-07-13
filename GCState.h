@@ -1,6 +1,30 @@
 #pragma once
 #include <stdint.h>
 #include <atomic>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+
+#include <assert.h>
+#include <chrono>
+#include <random>
+#include <signal.h>
+
+// NB: On Windows, you must include Winbase.h/Synchapi.h/Windows.h before pevents.h
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN 
+#include <Windows.h>
+#endif
+//A library to simulate Windows events on Posix
+//I use this because, on Windows, the events don't need a mutex, so the calls should be more efficient than using condition variables etc - no possible pause caused by contention over the mutex.
+#include "pevents/pevents.h"
+
+#ifdef _WIN32
+#define __unused__  [[maybe_unused]]
+#else
+#define __unused__ __attribute__((unused))
+#endif
+
 #if defined(_MSC_VER)
 /* Microsoft C/C++-compatible compiler */
 #include <intrin.h>
@@ -19,6 +43,7 @@ namespace GC {
         temp.m128i_u64[1] = temp.m128i_u64[0] = (uint64_t)v;
         _mm_store_si128(dest, temp);
     }
+
     inline void single_ptr_store(SnapPtr* dest, void* v)
     {
         dest->m128i_u64[0] = (uint64_t)v;
@@ -36,6 +61,21 @@ namespace GC {
     inline bool double_ptr_CAS(SnapPtr* dest, SnapPtr* expected, SnapPtr src)
     {
         return _InterlockedCompareExchange128(&dest->m128i_i64[0], src.m128i_i64[1], src.m128i_i64[0], &expected->m128i_i64[0]);
+    }
+    void fast_restore(SnapPtr* source)
+    {
+        SnapPtr temp = _mm_load_si128(source);
+        if (temp.m128i_i64[0] != temp.m128i_i64[1])temp.m128i_i64[1] = temp.m128i_i64[0];
+
+    }
+    void restore(SnapPtr* source)
+    {
+        SnapPtr temp = _mm_load_si128(source);;
+        do {
+            if (temp.m128i_i64[0] == temp.m128i_i64[1]) {
+                return;
+            }
+        } while (!_InterlockedCompareExchange128(&source->m128i_i64[0], temp.m128i_i64[0], temp.m128i_i64[0], &temp.m128i_i64[0]));
     }
 
     extern thread_local void (*write_barrier)(SnapPtr*, void*);

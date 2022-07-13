@@ -143,11 +143,13 @@
     <ClCompile Include="GCState.cpp" />
     <ClCompile Include="LockFreeFIFO.cpp" />
     <ClCompile Include="pauselessgc.cpp" />
+    <ClCompile Include="pevents\pevents.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Collectable.h" />
     <ClInclude Include="GCState.h" />
     <ClInclude Include="LockFreeFIFO.h" />
+    <ClInclude Include="pevents\pevents.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
