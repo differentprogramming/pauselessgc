@@ -10,7 +10,7 @@ class InstancePtrBase
 protected:
 public:
     GC::SnapPtr value;
-    Collectable* get_collectable() { return (Collectable *)GC::load(&value); }
+    Collectable* get_collectable() { return (Collectable *)GC::load_snapshot(&value); }
     void mark()
     {
         Collectable* s = get_collectable();
@@ -198,6 +198,7 @@ namespace GC {
     void _do_collection();
     void _do_restore_snapshot(Collectable*, RootLetterBase*);
     void _end_collection_start_restore_snapshot();
+    void _do_finalize_snapshot();
 }
 
 class Collectable {
@@ -206,6 +207,7 @@ protected:
     friend void GC::_do_collection();
     friend void GC::_do_restore_snapshot(Collectable*, RootLetterBase*);
     friend void GC::_end_collection_start_restore_snapshot();
+    friend void GC::_do_finalize_snapshot();
 
     enum Sentinal { SENTINAL };
     //when not tracing contains self index
@@ -279,10 +281,8 @@ class CollectableSentinal : public Collectable
 {
 public:
     CollectableSentinal():Collectable(SENTINAL) {}
-    virtual int num_ptrs_in_snapshot() { return 0; }
-    virtual GC::SnapPtr* index_into_snapshot_ptrs(int num) { return nullptr; };
+    virtual int total_instance_vars() { return 0; }
     //not snapshot, includes ones that could be null because they're live
-    virtual int total_collectable_ptrs() { return 0; }
     virtual size_t my_size() { return sizeof(*this); }
-    virtual Collectable* index_into_collectable_ptrs(int num) { return nullptr; }
+    virtual InstancePtrBase* index_into_instance_vars(int num) { return nullptr; }
 };

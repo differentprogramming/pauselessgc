@@ -33,7 +33,15 @@
 #include <x86intrin.h>
 #endif
 #include "LockFreeFIFO.h"
+
+#define cnew(A) GC::log_alloc(new A)
+#define cnew_array(A,N) ([&]{ auto _NfjkasjdflN_ = N; auto * _AskdlfA_=new A[_NfjkasjdflN_];  GC::log_array_alloc(sizeof(_AskdlfA_[0]),_NfjkasjdflN_); return _AskdlfA_; })()
+
 namespace GC {
+
+    void log_alloc(size_t a);
+    void log_array_alloc(size_t a, size_t n);
+
 
     typedef __m128i SnapPtr;
 
@@ -51,6 +59,10 @@ namespace GC {
     inline void* load(SnapPtr* dest)
     {
         return (void*)dest->m128i_u64[0];
+    }
+    inline void* load_snapshot(SnapPtr* dest)
+    {
+        return (void*)dest->m128i_u64[1];
     }
     inline SnapPtr double_ptr_swap(SnapPtr* dest, SnapPtr src)
     {
@@ -82,6 +94,7 @@ namespace GC {
 
     enum class PhaseEnum : std::uint8_t
     {
+        NOT_MUTATING,
         NOT_COLLECTING,
         COLLECTING,
         RESTORING_SNAPSHOT,
@@ -91,6 +104,7 @@ namespace GC {
     {
         uint8_t threads_not_mutating;
         uint8_t threads_in_collection;
+        uint8_t threads_in_sweep;
         uint8_t threads_out_of_collection;
         PhaseEnum phase;
     };
@@ -109,13 +123,7 @@ namespace GC {
 
     extern StateStoreType State;
 
-    enum class ThreadStateEnum {
-        NOT_MUTATING,
-        IN_COLLECTION,
-        OUT_OF_COLLECTION
-    };
-
-    extern thread_local ThreadStateEnum ThreadState;
+    extern thread_local PhaseEnum ThreadState;
     extern thread_local int NotMutatingCount;
     extern thread_local int MyThreadNumber;
 
