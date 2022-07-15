@@ -48,7 +48,7 @@ int main()
     GC::init_thread();
 
 
-    const int Testlen = 1000000;
+    const int Testlen = 10000000;
     RootPtr<RandomCounted> *bunch = new RootPtr<RandomCounted>[Testlen];
     std::default_random_engine generator;
     std::uniform_int_distribution<int> distribution(0, Testlen - 1);

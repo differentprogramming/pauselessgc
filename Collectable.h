@@ -171,7 +171,7 @@ struct RootLetter : public RootLetterBase
 {
     InstancePtr<T> value;
     virtual GC::SnapPtr* double_ptr() { return &value.value; }
-    virtual void mark() { value->mark(); }
+    virtual void mark() { if (value.get_collectable()!=nullptr) value->mark(); }
 
     RootLetter() {}
     RootLetter(T *v) :value(v){}

@@ -161,7 +161,7 @@ namespace GC {
         }
         StartCollectionEvent = CreateEvent();
         CollectionThread = std::thread(collect_thread);
-        TriggerPoint = 100000000;
+        TriggerPoint = 200000000;
     }
 
     /*
