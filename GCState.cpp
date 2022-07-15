@@ -147,7 +147,9 @@ namespace GC {
                 snapshot_c->sweep_next = snapshot_c->sweep_prev = snapshot_c;
 
             }
-            //{}{}{} finish
+            //save the start before any new allocations
+            ScanListsByThread[i]->collectables[2]= ScanListsByThread[i]->collectables[ActiveIndex]->sweep_next;
+            
             RootLetterBase* active_r = ScanListsByThread[i]->roots[ActiveIndex];
             RootLetterBase* snapshot_r = ScanListsByThread[i]->roots[(ActiveIndex ^ 1)];
             if (snapshot_r->next != snapshot_r)
@@ -159,7 +161,9 @@ namespace GC {
                 snapshot_r->next = snapshot_r->prev = snapshot_r;
 
             }
+            ScanListsByThread[i]->roots[2] = ScanListsByThread[i]->roots[ActiveIndex]->next;
         }
+ 
     }
 
     void collect_thread();
@@ -229,35 +233,36 @@ namespace GC {
         }
     }
 
-    thread_local Collectable* save_col_start;
-    thread_local RootLetterBase* save_root_start;
 
-    void _do_restore_snapshot(Collectable *t, RootLetterBase* r)
+    void _do_restore_snapshot()
     {
-        save_col_start = t;
-        save_root_start = r;
+
         for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
             if (nullptr == ScanListsByThread[i]) continue;
             Collectable* snapshot_c = ScanListsByThread[i]->collectables[ActiveIndex];
+            Collectable* t = ScanListsByThread[i]->collectables[2];
             while (t != snapshot_c) {
                 t = t->sweep_next;
                 for (int j = t->total_instance_vars() - 1; j >= 0; --j) {
-                    fast_restore(&t->index_into_instance_vars(j)->value);
+                    restore(&t->index_into_instance_vars(j)->value);
                 }
             }            
             RootLetterBase* snapshot_r = ScanListsByThread[i]->roots[ActiveIndex];
+            RootLetterBase* r = ScanListsByThread[i]->roots[2];
             while (r != snapshot_r) {
-                fast_restore(r->double_ptr());
+                restore(r->double_ptr());
                 r = r->next;
             }
         }
     }
     void _do_finalize_snapshot()
     {
+        return;
+        std::cout << "actually about to finalize snapshot \n";
         for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
             if (nullptr == ScanListsByThread[i]) continue;
             Collectable* snapshot_c = ScanListsByThread[i]->collectables[ActiveIndex];
-            Collectable* t = save_col_start;
+            Collectable* t = ScanListsByThread[i]->collectables[2];
             while (t != snapshot_c) {
                 t = t->sweep_next;
                 for (int j = t->total_instance_vars() - 1; j >= 0; --j) {
@@ -265,7 +270,7 @@ namespace GC {
                 }
             }
             RootLetterBase* snapshot_r = ScanListsByThread[i]->roots[ActiveIndex];
-            RootLetterBase* r = save_root_start;
+            RootLetterBase* r = ScanListsByThread[i]->roots[2];
             while (r != snapshot_r) {
                 restore(r->double_ptr());
                 r = r->next;
@@ -327,8 +332,7 @@ namespace GC {
         while (true) {
             if (to.state.threads_in_collection == 1) {
                 merge_collected();
-                t = GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex]->sweep_next;
-                r = GC::ScanListsByThread[GC::MyThreadNumber]->roots[GC::ActiveIndex]->next;
+ 
                 do {
                     to = gc;
                     to.state.threads_in_collection--;//release them
@@ -343,7 +347,7 @@ namespace GC {
             to = get_state();
         }
         if (CombinedThread && ThreadState != PhaseEnum::NOT_MUTATING)  SetThreadState(PhaseEnum::RESTORING_SNAPSHOT);
-        _do_restore_snapshot(t, r);
+        _do_restore_snapshot();
         return;
     }
 

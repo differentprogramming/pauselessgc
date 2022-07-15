@@ -15,7 +15,7 @@ public:
 
     void set_first(RootPtr<RandomCounted> &o) {
         if (nullptr != o.get()) ++o->points_at_me;
-        if (nullptr != first.get())--first->points_at_me;
+        if (nullptr != first.get())--(first->points_at_me);
         first = o;
     }
     void set_second(RootPtr<RandomCounted> &o) {
@@ -26,8 +26,8 @@ public:
     RandomCounted() :points_at_me(0) {}
     ~RandomCounted()
     {
-        if (0 == points_at_me) std::cout << "Correct delete\n";
-        else std::cout << "*** incorrect or cycle delete. Holds "<<points_at_me<<"\n";
+//        if (0 == points_at_me) std::cout << "Correct delete\n";
+//        else std::cout << "*** incorrect or cycle delete. Holds "<<points_at_me<<"\n";
     }
     int total_instance_vars() { return 2; }
     InstancePtrBase* index_into_instance_vars(int num) {

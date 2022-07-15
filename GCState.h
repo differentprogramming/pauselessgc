@@ -76,13 +76,15 @@ namespace GC {
     }
     inline void fast_restore(SnapPtr* source)
     {
+        if (source == nullptr) return;
         SnapPtr temp = _mm_load_si128(source);
-        if (temp.m128i_i64[0] != temp.m128i_i64[1])temp.m128i_i64[1] = temp.m128i_i64[0];
+        if (temp.m128i_i64[0] != temp.m128i_i64[1])source->m128i_i64[1] = temp.m128i_i64[0];
 
     }
     inline void restore(SnapPtr* source)
     {
-        SnapPtr temp = _mm_load_si128(source);;
+        if (source == nullptr) return;
+        SnapPtr temp = _mm_load_si128(source);
         do {
             if (temp.m128i_i64[0] == temp.m128i_i64[1]) {
                 return;

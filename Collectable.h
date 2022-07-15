@@ -68,8 +68,8 @@ struct RootLetterBase;
 namespace GC {
     struct ScanLists
     {
-        Collectable* collectables[2];
-        RootLetterBase* roots[2];
+        Collectable* collectables[3];
+        RootLetterBase* roots[3];
     };
 
     extern ScanLists* ScanListsByThread[MAX_COLLECTED_THREADS];
@@ -189,7 +189,7 @@ void InstancePtr<T>::operator = (const RootPtr<Y>& v) {
 namespace GC {
     void merge_collected();
     void _do_collection();
-    void _do_restore_snapshot(Collectable*, RootLetterBase*);
+    void _do_restore_snapshot();
     void _end_collection_start_restore_snapshot();
     void _do_finalize_snapshot();
 }
@@ -198,7 +198,7 @@ class Collectable {
 protected:
     friend void GC::merge_collected();
     friend void GC::_do_collection();
-    friend void GC::_do_restore_snapshot(Collectable*, RootLetterBase*);
+    friend void GC::_do_restore_snapshot();
     friend void GC::_end_collection_start_restore_snapshot();
     friend void GC::_do_finalize_snapshot();
 
@@ -228,9 +228,10 @@ public:
         Collectable* c = this;
         if (!c->marked) {
             c->marked = true;
-            int t = total_instance_vars() - 1;
             for (;;) {
+                int t = total_instance_vars() - 1;
             outer:
+                
                 do {
                     if (t >= 0) {
                         n = c->index_into_instance_vars(t)->get_collectable();
@@ -244,13 +245,13 @@ public:
                         }
                     }
                     --t;
-                } while (n == nullptr);
+                } while (n == nullptr && t>=0);
+                n = c;
+                c = c->back_ptr;
+                n->back_ptr = nullptr;
+                t = back_ptr_from_counter - 1;
+                if (c == nullptr) return;
             }
-            n = c;
-            c = c->back_ptr;
-            n->back_ptr = nullptr;
-            t = back_ptr_from_counter - 1;
-            if (c == nullptr) return;
         }
     }
     //virtual int num_ptrs_in_snapshot() = 0;
