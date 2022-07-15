@@ -67,7 +67,7 @@ int main()
             bunch[i]->set_first(bunch[distribution(generator)]);
             bunch[i]->set_second(bunch[distribution(generator)]);
         }
-        for (int i = 0; i < Testlen; ++i)
+        for (int i = 0; i < Testlen>>1; ++i)
         {
             GC::safe_point();
             bunch[i] = cnew(RandomCounted);

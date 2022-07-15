@@ -255,7 +255,6 @@ namespace GC {
         assert(gc.state.phase == PhaseEnum::NOT_COLLECTING);
 
         bool one_shot = false;
-        std::cout << "threads_out_of_collection start " << (int)gc.state.threads_out_of_collection << "\nthreads_in_collection starts " << (int)gc.state.threads_in_collection << "\n";
         StateStoreType to;
         do {
             to = gc;
@@ -266,10 +265,10 @@ namespace GC {
         while (true) {
             if (!one_shot && to.state.threads_in_collection != 0) {
                 one_shot = true;
-                std::cout << "threads_out_of_collection now " << (int)gc.state.threads_out_of_collection << "\nthreads_in_collection now " << (int)gc.state.threads_in_collection << "\n";
             }
             if (to.state.threads_out_of_collection == 1) {
-                ActiveIndex ^= 1;
+                if (!one_shot) ActiveIndex ^= 1;
+                one_shot = true;
                 do {
                     to = gc;
                     to.state.threads_out_of_collection--;//release them
