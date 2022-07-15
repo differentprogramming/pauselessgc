@@ -263,6 +263,7 @@ namespace GC {
         assert(gc.state.phase == PhaseEnum::NOT_COLLECTING);
 
         bool one_shot = false;
+        bool released = false;
         StateStoreType to;
         do {
             to = gc;
@@ -276,8 +277,9 @@ namespace GC {
                 one_shot = true;
                 do {
                     to = gc;
-                    to.state.threads_out_of_collection--;//release them
+                    if (!released) to.state.threads_out_of_collection--;//release them
                 } while (!compare_set_state(&gc, to));
+                released = true;
                 if (to.state.threads_out_of_collection == 0) break;
             }
 #ifdef _WIN32
@@ -298,6 +300,7 @@ namespace GC {
         StateStoreType to;
         Collectable* t=nullptr;
         RootLetterBase* r = nullptr;
+        bool released = false;
         do {
             to = gc;
             to.state.threads_in_collection++;//stop everyone till I'm done
@@ -309,8 +312,9 @@ namespace GC {
  
                 do {
                     to = gc;
-                    to.state.threads_in_collection--;//release them
+                    if (!released) to.state.threads_in_collection--;//release them
                 } while (!compare_set_state(&gc, to));
+                released = true;
                 if (to.state.threads_in_collection == 0) break;
             }
 #ifdef _WIN32
@@ -330,6 +334,7 @@ namespace GC {
         StateStoreType gc = get_state();
         assert(gc.state.phase == PhaseEnum::RESTORING_SNAPSHOT);
         StateStoreType to;
+        bool released = false;
         do {
             to = gc;
             to.state.phase = PhaseEnum::NOT_COLLECTING;
@@ -341,8 +346,9 @@ namespace GC {
                 ActiveIndex ^= 1;
                 do {
                     to = gc;
-                    to.state.threads_in_sweep--;//release them
+                    if (!released) to.state.threads_in_sweep--;//release them
                 } while (!compare_set_state(&gc, to));
+                released = true;
                 if (to.state.threads_in_sweep == 0) break;
             }
 #ifdef _WIN32

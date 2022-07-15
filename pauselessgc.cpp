@@ -6,28 +6,31 @@
 
 #include "Collectable.h"
 
+static int identity_counter = 0;
+
 class RandomCounted : public Collectable
 {
 public:
     int points_at_me;
+    int identity;
     InstancePtr<RandomCounted> first;
     InstancePtr<RandomCounted> second;
 
-    void set_first(RootPtr<RandomCounted> o2, RootPtr<RandomCounted> &o) {
+    void set_first(RootPtr<RandomCounted> &o2, RootPtr<RandomCounted> &o) {
         memtest();
         assert(o.get() == o2.get());
         if (nullptr != o.get()) ++o->points_at_me;
         if (nullptr != first.get())--(first->points_at_me);
         first = o;
     }
-    void set_second(RootPtr<RandomCounted> o2, RootPtr<RandomCounted>& o) {
+    void set_second(RootPtr<RandomCounted> &o2, RootPtr<RandomCounted>& o) {
         memtest();
         assert(o.get() == o2.get());
         if (nullptr != o.get()) ++o->points_at_me;
         if (nullptr != second.get())--second->points_at_me;
         second = o;
     }
-    RandomCounted() :points_at_me(0) {}
+    RandomCounted() :points_at_me(0),identity(++identity_counter) {}
     ~RandomCounted()
     {
 //        if (0 == points_at_me) std::cout << "Correct delete\n";
