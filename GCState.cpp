@@ -196,6 +196,7 @@ namespace GC {
 
             while (++itc) {
                 if (!static_cast<Collectable*>(&*itc)->marked) itc.remove();
+                else static_cast<Collectable*>(&*itc)->marked = false;
             }
 
             itc = ScanListsByThread[i]->roots[(ActiveIndex ^ 1)]->iterate();
