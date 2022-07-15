@@ -21,7 +21,7 @@ public:
     void set_second(RootPtr<RandomCounted> &o) {
         if (nullptr != o.get()) ++o->points_at_me;
         if (nullptr != second.get())--second->points_at_me;
-        first = o;
+        second = o;
     }
     RandomCounted() :points_at_me(0) {}
     ~RandomCounted()
@@ -67,7 +67,7 @@ int main()
             bunch[i]->set_first(bunch[distribution(generator)]);
             bunch[i]->set_second(bunch[distribution(generator)]);
         }
-        for (int i = 0; i < Testlen >> 1; ++i)
+        for (int i = 0; i < Testlen; ++i)
         {
             GC::safe_point();
             bunch[i] = cnew(RandomCounted);

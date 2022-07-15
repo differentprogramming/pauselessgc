@@ -131,37 +131,15 @@ namespace GC {
             if (nullptr == ScanListsByThread[i]) continue;
             Collectable* active_c = ScanListsByThread[i]->collectables[ActiveIndex];
             Collectable* snapshot_c = ScanListsByThread[i]->collectables[(ActiveIndex^1)];
-            if (snapshot_c->sweep_next != snapshot_c)
-            {
-                /*
-                
-        1sp <-   2s   -> 3sn            1sp >< 6an .. 4ap >< 5a >< 3sn .. 1sp
-            ->6an    5a<-
-        4ap ->   5a  ->3sn 6an               
-            <-     1sp<-
-                */
-                snapshot_c->sweep_next->sweep_prev = active_c;
-                snapshot_c->sweep_prev->sweep_next = active_c->sweep_next;
-                active_c->sweep_next->sweep_prev = snapshot_c->sweep_prev;
-                active_c->sweep_next = snapshot_c->sweep_next;
-                snapshot_c->sweep_next = snapshot_c->sweep_prev = snapshot_c;
-
-            }
+            merge_from_to(snapshot_c, active_c);
             //save the start before any new allocations
-            ScanListsByThread[i]->collectables[2]= ScanListsByThread[i]->collectables[ActiveIndex]->sweep_next;
+            ScanListsByThread[i]->collectables[2]= static_cast<Collectable *>(ScanListsByThread[i]->collectables[ActiveIndex]->next);
             
             RootLetterBase* active_r = ScanListsByThread[i]->roots[ActiveIndex];
             RootLetterBase* snapshot_r = ScanListsByThread[i]->roots[(ActiveIndex ^ 1)];
-            if (snapshot_r->next != snapshot_r)
-            {
-                snapshot_r->next->prev = active_r;
-                snapshot_r->prev->next = active_r->next;
-                active_r->next->prev = snapshot_r->prev;
-                active_r->next = snapshot_r->next;
-                snapshot_r->next = snapshot_r->prev = snapshot_r;
+            merge_from_to(snapshot_r, active_r);
 
-            }
-            ScanListsByThread[i]->roots[2] = ScanListsByThread[i]->roots[ActiveIndex]->next;
+            ScanListsByThread[i]->roots[2] = static_cast<RootLetterBase*>(ScanListsByThread[i]->roots[ActiveIndex]->next);
         }
  
     }
@@ -204,32 +182,27 @@ namespace GC {
         //mark
         for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
             if (nullptr == ScanListsByThread[i]) continue;
-            RootLetterBase* snapshot_r = ScanListsByThread[i]->roots[(ActiveIndex ^ 1)];
-            RootLetterBase* n = snapshot_r->next;
-            while (n != snapshot_r) {
-                n->mark();
-                n = n->next;
+            auto it = ScanListsByThread[i]->roots[(ActiveIndex ^ 1)]->iterate();
+
+            while (++it) {
+                static_cast<RootLetterBase*>(&*it)->mark();
             }
 
         }
         //sweep
         for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
             if (nullptr == ScanListsByThread[i]) continue;
-            Collectable* snapshot_c = ScanListsByThread[i]->collectables[(ActiveIndex ^ 1)];
-            Collectable* c = snapshot_c->sweep_next;
-            while (c != snapshot_c) {
-                Collectable* t = c;
-                c = c->sweep_next;
-                if (!t->marked) delete t;
+            auto itc = ScanListsByThread[i]->collectables[(ActiveIndex ^ 1)]->iterate();
+
+            while (++itc) {
+                if (!static_cast<Collectable*>(&*itc)->marked) itc.remove();
             }
 
-            RootLetterBase* snapshot_r = ScanListsByThread[i]->roots[(ActiveIndex ^ 1)];
-            RootLetterBase* n = snapshot_r->next;
-            while (n != snapshot_r) {
-                RootLetterBase* t = n;
-                n = n->next;
-                if (!t->owned) delete t;
+            itc = ScanListsByThread[i]->roots[(ActiveIndex ^ 1)]->iterate();
+            while (++itc) {
+                if (!static_cast<RootLetterBase*>(&*itc)->owned) itc.remove();
             }
+
         }
     }
 
@@ -240,42 +213,38 @@ namespace GC {
         for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
             if (nullptr == ScanListsByThread[i]) continue;
             Collectable* snapshot_c = ScanListsByThread[i]->collectables[ActiveIndex];
-            Collectable* t = ScanListsByThread[i]->collectables[2];
-            while (t != snapshot_c) {
-                t = t->sweep_next;
-                for (int j = t->total_instance_vars() - 1; j >= 0; --j) {
-                    restore(&t->index_into_instance_vars(j)->value);
+            auto t = ScanListsByThread[i]->collectables[2]->iterate();
+            while (t) {
+                for (int j = static_cast<Collectable*>(&*t)->total_instance_vars() - 1; j >= 0; --j) {
+                    fast_restore(&(static_cast<Collectable*>(&*t)->index_into_instance_vars(j)->value));
                 }
+                ++t;
             }            
-            RootLetterBase* snapshot_r = ScanListsByThread[i]->roots[ActiveIndex];
-            RootLetterBase* r = ScanListsByThread[i]->roots[2];
-            while (r != snapshot_r) {
-                restore(r->double_ptr());
-                r = r->next;
+            t = ScanListsByThread[i]->roots[2]->iterate();
+            while (t) {
+                fast_restore(static_cast<RootLetterBase*>(&*t)->double_ptr());
+                ++t;
             }
         }
     }
     void _do_finalize_snapshot()
     {
-        return;
         std::cout << "actually about to finalize snapshot \n";
         for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
             if (nullptr == ScanListsByThread[i]) continue;
             Collectable* snapshot_c = ScanListsByThread[i]->collectables[ActiveIndex];
-            Collectable* t = ScanListsByThread[i]->collectables[2];
-            while (t != snapshot_c) {
-                t = t->sweep_next;
-                for (int j = t->total_instance_vars() - 1; j >= 0; --j) {
-                    restore(&t->index_into_instance_vars(j)->value);
+            auto t = ScanListsByThread[i]->collectables[2]->iterate();
+            while (t) {
+                for (int j = static_cast<Collectable*>(&*t)->total_instance_vars() - 1; j >= 0; --j) {
+                    restore(&(static_cast<Collectable*>(&*t)->index_into_instance_vars(j)->value));
                 }
+                ++t;
             }
-            RootLetterBase* snapshot_r = ScanListsByThread[i]->roots[ActiveIndex];
-            RootLetterBase* r = ScanListsByThread[i]->roots[2];
-            while (r != snapshot_r) {
-                restore(r->double_ptr());
-                r = r->next;
+            t = ScanListsByThread[i]->roots[2]->iterate();
+            while (t) {
+                restore(static_cast<RootLetterBase*>(&*t)->double_ptr());
+                ++t;
             }
-
         }
     }
 
@@ -501,7 +470,7 @@ namespace GC {
 
             for (int i = 0; i < 2; ++i) {
                 s->collectables[i] = new CollectableSentinal();
-                s->roots[i] = new RootLetterBase(RootLetterBase::SENTINAL);
+                s->roots[i] = new RootLetterBase(_SENTINEL_);
             }
             ScanListsByThread[MyThreadNumber] = s;
         }

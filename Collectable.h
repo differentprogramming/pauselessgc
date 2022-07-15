@@ -1,6 +1,77 @@
 #pragma once
 #include "GCState.h"
 
+
+enum _before_ { _BEFORE_, _END_ };
+enum _after_ { _AFTER_, _START_ };
+enum _sentinel_ { _SENTINEL_ };
+
+class CircularDoubleList;
+
+void merge_from_to(CircularDoubleList* source, CircularDoubleList* dest);
+namespace GC {
+    void merge_collected();
+}
+class CircularDoubleList 
+{
+    friend void merge_from_to(CircularDoubleList* source, CircularDoubleList* dest);
+    friend void GC::merge_collected();
+    CircularDoubleList* prev;
+    CircularDoubleList* next;
+    bool is_sentinel;
+
+public:
+
+    //doesn't conform to a standard iterator, though I suppose I could make it
+    //It is a bald iterator for a circular list with a sentinal.  It is always
+    //it's bidirectional, and it's always safe to delete at the iterator and then
+    //shift forward or reverse... except that you should never delete the sentinal
+    //execept from an already empty list.
+    class iterator
+    {
+        CircularDoubleList* center;
+        CircularDoubleList* next;
+        CircularDoubleList* prev;
+    public:
+        iterator(CircularDoubleList& c) :center(&c), next(c.next), prev(c.prev) {}
+        iterator& remove() { delete center; return *this; }
+        CircularDoubleList& operator*() { return *center; }
+        bool operator ++() { center = next; prev = center->prev; next = center->next;  return !center->sentinel(); }
+
+        bool operator --() { center = prev; prev = center->prev; next = center->next;  return !center->sentinel(); }
+
+        operator bool() { return !center->sentinel(); }
+        bool operator !() { return center->sentinel(); }
+    };
+    iterator iterate() { return iterator(*this); }
+    bool sentinel() const { return is_sentinel; }
+
+    virtual ~CircularDoubleList() { next->prev = prev; prev->next = next;}
+    CircularDoubleList(_sentinel_) :prev(this), next(this), is_sentinel(true){}
+    CircularDoubleList(_before_, CircularDoubleList* e) :prev(e->prev), next(e), is_sentinel(false)
+    {
+        next->prev = prev->next = this;
+    }
+    CircularDoubleList(_after_, CircularDoubleList* e) :prev(e), next(e->next),  is_sentinel(false)
+    {
+        next->prev = prev->next = this;
+    }
+
+    bool empty() { return next == prev; }
+};
+inline void merge_from_to(CircularDoubleList* source, CircularDoubleList* dest) {
+    assert(source->sentinel());
+    assert(dest->sentinel());
+
+    if (!source->empty()) {
+        source->next->prev = dest;
+        source->prev->next = dest->next;
+        dest->next->prev = source->prev;
+        dest->next = source->next;
+        source->next = source->prev = source;
+    }
+}
+
 template <typename T>
 struct RootPtr;
 class Collectable;
@@ -77,32 +148,22 @@ namespace GC {
 }
 
 
-struct RootLetterBase
+struct RootLetterBase : public CircularDoubleList
 {
-    enum Sentinal { SENTINAL };
-    RootLetterBase* next;
-    RootLetterBase* prev;
     bool owned;
     virtual GC::SnapPtr* double_ptr() { return nullptr; }
 
-    RootLetterBase(Sentinal): owned(true) { next = prev = this; }
+    RootLetterBase(_sentinel_): CircularDoubleList(_SENTINEL_),owned(true) {  }
     RootLetterBase();
     virtual void mark() {}
     virtual ~RootLetterBase()
     {
-
-        prev->next = next;
-        next->prev = prev;
     }
 };
 
-inline RootLetterBase::RootLetterBase():owned(true)
+inline RootLetterBase::RootLetterBase():CircularDoubleList(_START_,GC::ScanListsByThread[GC::MyThreadNumber]->roots[GC::ActiveIndex]),owned(true)
 {
-    RootLetterBase* t = GC::ScanListsByThread[GC::MyThreadNumber]->roots[GC::ActiveIndex];
-    prev = t;
-    next = t->next;
-    next->prev = this;
-    t->next = this;
+
 }
 
 template <typename T>
@@ -194,7 +255,7 @@ namespace GC {
     void _do_finalize_snapshot();
 }
 
-class Collectable {
+class Collectable: public CircularDoubleList {
 protected:
     friend void GC::merge_collected();
     friend void GC::_do_collection();
@@ -202,23 +263,21 @@ protected:
     friend void GC::_end_collection_start_restore_snapshot();
     friend void GC::_do_finalize_snapshot();
 
-    enum Sentinal { SENTINAL };
+
     //when not tracing contains self index
     //when tracing points back to where we came from or 0 if that was a root
     //when in a free list points to the next free element as an unbiased index into this block
     Collectable* back_ptr;
-    Collectable* sweep_next;
-    Collectable* sweep_prev;
+
     uint32_t back_ptr_from_counter;//came from nth snapshot ptr
     //std::atomic_bool marked;
     bool marked; //only one collection thread
     virtual ~Collectable() 
     {
-        sweep_next->sweep_prev = sweep_prev;
-        sweep_prev->sweep_next = sweep_next;
+
     }
-    Collectable(Sentinal) {
-        sweep_prev = sweep_next = this;
+    Collectable(_sentinel_) : CircularDoubleList(_SENTINEL_), back_ptr(nullptr) , marked(true){
+        
     }
 
 public:
@@ -228,29 +287,27 @@ public:
         Collectable* c = this;
         if (!c->marked) {
             c->marked = true;
+            int t = total_instance_vars() - 1;
             for (;;) {
-                int t = total_instance_vars() - 1;
-            outer:
-                
-                do {
-                    if (t >= 0) {
-                        n = c->index_into_instance_vars(t)->get_collectable();
-                        if (n != nullptr && !n->marked) {
-                            n->marked = true;
-                            n->back_ptr_from_counter = t;
-                            n->back_ptr = c;
-                            c = n;
-                            t = c->total_instance_vars()-1;
-                            goto outer;
-                        }
+                if (t >= 0) {
+                    n = c->index_into_instance_vars(t)->get_collectable();
+                    if (n != nullptr && !n->marked) {
+                        n->marked = true;
+                        n->back_ptr_from_counter = t;
+                        n->back_ptr = c;
+                        c = n;
+                        t = c->total_instance_vars() - 1;
+                        continue;
                     }
                     --t;
-                } while (n == nullptr && t>=0);
-                n = c;
-                c = c->back_ptr;
-                n->back_ptr = nullptr;
-                t = back_ptr_from_counter - 1;
-                if (c == nullptr) return;
+                }
+                else {
+                    if (c == this) return;
+                    n = c;
+                    c = c->back_ptr;
+                    n->back_ptr = nullptr;
+                    t = n->back_ptr_from_counter - 1;
+                }
             }
         }
     }
@@ -261,20 +318,15 @@ public:
     virtual size_t my_size() = 0;
     virtual InstancePtrBase* index_into_instance_vars(int num) = 0;
 
-    Collectable() {
-        Collectable* t = GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex];
-        sweep_prev = t;
-        sweep_next = t->sweep_next;
-        sweep_next->sweep_prev = this;
-        t->sweep_next = this;
-    }
+    Collectable() :CircularDoubleList(_START_, GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex]), back_ptr(nullptr), marked(false) {
+        }
 
 };
 
 class CollectableSentinal : public Collectable
 {
 public:
-    CollectableSentinal():Collectable(SENTINAL) {}
+    CollectableSentinal():Collectable(_SENTINEL_) {}
     virtual int total_instance_vars() { return 0; }
     //not snapshot, includes ones that could be null because they're live
     virtual size_t my_size() { return sizeof(*this); }
