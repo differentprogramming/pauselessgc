@@ -146,7 +146,7 @@ namespace GC {
         ~ThreadRAII() { exit_thread(); }
     };
     void thread_leave_mutation();
-    void thread_enter_mutation();
+    void thread_enter_mutation(bool from_init_thread=false);
     struct LeaveMutationRAII
     {
         LeaveMutationRAII() { thread_leave_mutation(); }

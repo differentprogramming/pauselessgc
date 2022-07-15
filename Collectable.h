@@ -17,7 +17,7 @@ public:
 template <typename T>
 class InstancePtr : public InstancePtrBase
 {
-    void double_ptr_store(T* v) { GC::write_barrier(&value, (void*)v); }
+    void double_ptr_store(T* v) { GC::double_ptr_store(&value, (void*)v); }
 public:
 
     T* get() const { return (T*)GC::load(&value); }

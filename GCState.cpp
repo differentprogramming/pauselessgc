@@ -1,3 +1,4 @@
+#include <iostream>
 #include "Collectable.h"
 #include <cassert>
 #ifdef _WIN32
@@ -277,6 +278,9 @@ namespace GC {
     {
         StateStoreType gc = get_state();
         assert(gc.state.phase == PhaseEnum::NOT_COLLECTING);
+
+        bool one_shot = false;
+        std::cout << "threads_out_of_collection start " << (int)gc.state.threads_out_of_collection << "\nthreads_in_collection starts " << (int)gc.state.threads_in_collection << "\n";
         StateStoreType to;
         do {
             to = gc;
@@ -285,6 +289,10 @@ namespace GC {
         } while(!compare_set_state(&gc, to));
 
         while (true) {
+            if (!one_shot && to.state.threads_in_collection != 0) {
+                one_shot = true;
+                std::cout << "threads_out_of_collection now " << (int)gc.state.threads_out_of_collection << "\nthreads_in_collection now " << (int)gc.state.threads_in_collection << "\n";
+            }
             if (to.state.threads_out_of_collection == 1) {
                 ActiveIndex ^= 1;
                 do {
@@ -298,7 +306,7 @@ namespace GC {
 #else
             sched_yield();
 #endif 
-            StateStoreType to = get_state();
+            to = get_state();
         }
         if (CombinedThread && ThreadState !=PhaseEnum::NOT_MUTATING)  SetThreadState(PhaseEnum::COLLECTING);
         _do_collection();
@@ -332,7 +340,7 @@ namespace GC {
 #else
             sched_yield();
 #endif 
-            StateStoreType to = get_state();
+            to = get_state();
         }
         if (CombinedThread && ThreadState != PhaseEnum::NOT_MUTATING)  SetThreadState(PhaseEnum::RESTORING_SNAPSHOT);
         _do_restore_snapshot(t, r);
@@ -364,7 +372,7 @@ namespace GC {
 #else
             sched_yield();
 #endif 
-            StateStoreType to = get_state();
+            to = get_state();
         }
         if (CombinedThread && ThreadState != PhaseEnum::NOT_MUTATING)  SetThreadState(PhaseEnum::NOT_COLLECTING);
         _do_finalize_snapshot();
@@ -496,7 +504,7 @@ namespace GC {
         CombinedThread = false;
 
         NotMutatingCount = 1;
-        thread_enter_mutation();
+        thread_enter_mutation(true);
     }
 
     void exit_thread()
@@ -564,7 +572,7 @@ namespace GC {
         } while (!success);
         SetThreadState(PhaseEnum::NOT_MUTATING);
     }
-    void thread_enter_mutation()
+    void thread_enter_mutation(bool from_init_thread)
     {
         --NotMutatingCount;
         if (NotMutatingCount != 0) {
@@ -586,7 +594,7 @@ namespace GC {
                 ++to.state.threads_in_sweep;
             }
 
-            --to.state.threads_not_mutating;
+            if (!from_init_thread) --to.state.threads_not_mutating;
             success = compare_set_state(&gc, to);
         } while (!success);
         SetThreadState(to.state.phase);
@@ -629,10 +637,14 @@ namespace GC {
     {
         for (;;) {
             if (0 != WaitForEvent(StartCollectionEvent)) return; //there was an error, get out of here
+            std::cout << "starting collection\n";
             //if (TriggerPoint * 2 < MaxTriggerPoint) TriggerPoint.store(TriggerPoint*2,std::memory_order_release);
             _start_collection();
+            std::cout << "starting restore snapshot\n";
             _end_collection_start_restore_snapshot();
+            std::cout << "starting finalize snapshot\n";
             _end_sweep();
+            std::cout << "end collection\n";
         }
     }
 
