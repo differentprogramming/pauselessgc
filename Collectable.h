@@ -2,7 +2,7 @@
 #include "GCState.h"
 
 template <typename T>
-struct Value;
+struct RootPtr;
 class Collectable;
 
 class InstancePtrBase
@@ -11,21 +11,17 @@ protected:
 public:
     GC::SnapPtr value;
     Collectable* get_collectable() { return (Collectable *)GC::load_snapshot(&value); }
-    void mark()
-    {
-        Collectable* s = get_collectable();
-        if (s != nullptr) s->mark();
-    }
+    void mark();
 };
 
 template <typename T>
 class InstancePtr : public InstancePtrBase
 {
-    void double_ptr_store(T* v) { GC::write_barrier(&value, (void*)v) }
+    void double_ptr_store(T* v) { GC::write_barrier(&value, (void*)v); }
 public:
 
     T* get() const { return (T*)GC::load(&value); }
-    void store(T* v) { GC::write_barrier(&value, (void*)v) }
+    void store(T* v) { GC::write_barrier(&value, (void*)v); }
 
     T* operator -> () { return get(); }
     InstancePtr() { GC::double_ptr_store(&value, nullptr); }
@@ -39,9 +35,9 @@ public:
         store(o.get());
     }
     template<typename Y>
-    InstancePtr(const Value<Y>& o);
+    InstancePtr(const RootPtr<Y>& o);
     template<typename Y>
-    void operator = (const Value<Y>& o);
+    void operator = (const RootPtr<Y>& o);
 };
 
 template< class T, class U >
@@ -113,7 +109,7 @@ template <typename T>
 struct RootLetter : public RootLetterBase
 {
     InstancePtr<T> value;
-    virtual GC::SnapPtr* double_ptr() { return &value->value; }
+    virtual GC::SnapPtr* double_ptr() { return &value.value; }
     virtual void mark() { value->mark(); }
 
     RootLetter() {}
@@ -121,75 +117,72 @@ struct RootLetter : public RootLetterBase
 };
 
 template <typename T>
-struct Value
+struct RootPtr
 {
     RootLetter<T>* var;
 
     void operator = (T* o)
     {
         var->value.store(o);
-        return o;
     }
 
     template <typename Y>
-    void operator = (const Value<Y>& v)
+    void operator = (const RootPtr<Y>& v)
     {
         var->value.store(v.var->value.get());
-        return o;
     }
 
     template <typename Y>
     void operator = (const InstancePtr<Y>& v)
     {
         var->value.store(v.get());
-        return o;
     }
 
     T *get() { return var->value.get(); }
     T *operator -> () { return var->value.get(); }
     template <typename Y>
-    Value(Y* v) :var(new RootLetter<T>(v)) {}
+    RootPtr(Y* v) :var(new RootLetter<T>(v)) {}
     template <typename Y>
-    Value (const Value<Y>  &v) :var(new RootLetter<T>(v.var->value.get())){}
+    RootPtr (const RootPtr<Y>  &v) :var(new RootLetter<T>(v.var->value.get())){}
     template <typename Y>
-    Value (const InstancePtr<Y> &v) :var(new RootLetter<T>(v.get())) {}
-    Value() :var(new RootLetter<T>){}
-    ~Value() { var->owned = false; }
+    RootPtr (const InstancePtr<Y> &v) :var(new RootLetter<T>(v.get())) {}
+    RootPtr() :var(new RootLetter<T>){}
+    ~RootPtr() { var->owned = false; }
 };
 
 template< class T, class U >
-Value<T> static_pointer_cast(const Value<U>& v) noexcept
+RootPtr<T> static_pointer_cast(const RootPtr<U>& v) noexcept
 {
-    return Value<T>(static_cast<T*>(v.var->value.get()));
+    return RootPtr<T>(static_cast<T*>(v.var->value.get()));
 }
 
 template< class T, class U >
-Value<T> const_pointer_cast(const Value<U>& v) noexcept
+RootPtr<T> const_pointer_cast(const RootPtr<U>& v) noexcept
 {
-    return Value<T>(const_cast<T*>(v.var->value.get()));
+    return RootPtr<T>(const_cast<T*>(v.var->value.get()));
 }
 
 template< class T, class U >
-Value<T> const_dynamic_cast(const Value<U>& v) noexcept
+RootPtr<T> const_dynamic_cast(const RootPtr<U>& v) noexcept
 {
-    return Value<T>(dynamic_cast<T*>(v.var->value.get()));
+    return RootPtr<T>(dynamic_cast<T*>(v.var->value.get()));
 }
 
 template< class T, class U >
-Value<T> const_reinterpret_cast(const Value<U>& v) noexcept
+RootPtr<T> const_reinterpret_cast(const RootPtr<U>& v) noexcept
 {
-    return Value<T>(reinterpret_cast<T*>(v.var->value.get()));
+    return RootPtr<T>(reinterpret_cast<T*>(v.var->value.get()));
 }
 
 template<typename T>
 template<typename Y>
-InstancePtr<T>::InstancePtr(const Value<Y>& v) {
+InstancePtr<T>::InstancePtr(const RootPtr<Y>& v) {
     double_ptr_store(v.var->value.get());
 }
 
 template<typename T>
 template<typename Y>
-void InstancePtr<T>::operator = (const Value<Y>& o) {
+void InstancePtr<T>::operator = (const RootPtr<Y>& v) {
     store(v.var->value.get());
 }
 
@@ -231,7 +224,7 @@ protected:
 public:
     void mark()
     {
-        Collectable* n;
+        Collectable* n=nullptr;
         Collectable* c = this;
         if (!c->marked) {
             c->marked = true;

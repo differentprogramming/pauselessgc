@@ -178,6 +178,7 @@ namespace GC {
         }
         StartCollectionEvent = CreateEvent();
         CollectionThread = std::thread(collect_thread);
+        TriggerPoint = 100000000;
     }
 
     /*
@@ -290,7 +291,7 @@ namespace GC {
                     to = gc;
                     to.state.threads_out_of_collection--;//release them
                 } while (!compare_set_state(&gc, to));
-                return;
+                if (to.state.threads_out_of_collection == 0) break;
             }
 #ifdef _WIN32
             SwitchToThread();
@@ -308,6 +309,8 @@ namespace GC {
         StateStoreType gc = get_state();
         assert(gc.state.phase == PhaseEnum::COLLECTING);
         StateStoreType to;
+        Collectable* t=nullptr;
+        RootLetterBase* r = nullptr;
         do {
             to = gc;
             to.state.threads_in_collection++;//stop everyone till I'm done
@@ -316,15 +319,13 @@ namespace GC {
         while (true) {
             if (to.state.threads_in_collection == 1) {
                 merge_collected();
-                Collectable* t = GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex]->sweep_next;
-                RootLetterBase *r = GC::ScanListsByThread[GC::MyThreadNumber]->roots[GC::ActiveIndex]->next;
+                t = GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex]->sweep_next;
+                r = GC::ScanListsByThread[GC::MyThreadNumber]->roots[GC::ActiveIndex]->next;
                 do {
                     to = gc;
                     to.state.threads_in_collection--;//release them
                 } while (!compare_set_state(&gc, to));
-                if (CombinedThread && ThreadState != PhaseEnum::NOT_MUTATING)  SetThreadState(PhaseEnum::RESTORING_SNAPSHOT);
-                _do_restore_snapshot(t,r);
-                return;
+                if (to.state.threads_in_collection == 0) break;
             }
 #ifdef _WIN32
             SwitchToThread();
@@ -333,6 +334,9 @@ namespace GC {
 #endif 
             StateStoreType to = get_state();
         }
+        if (CombinedThread && ThreadState != PhaseEnum::NOT_MUTATING)  SetThreadState(PhaseEnum::RESTORING_SNAPSHOT);
+        _do_restore_snapshot(t, r);
+        return;
     }
 
     void _end_sweep()
@@ -353,7 +357,7 @@ namespace GC {
                     to = gc;
                     to.state.threads_in_sweep--;//release them
                 } while (!compare_set_state(&gc, to));
-                return;
+                if (to.state.threads_in_sweep == 0) break;
             }
 #ifdef _WIN32
             SwitchToThread();
@@ -370,7 +374,7 @@ namespace GC {
     StateStoreType get_state()
     {
         StateStoreType ret;
-        ret.store = ((std::atomic_uint32_t*)&State.store)->load(std::memory_order_seq_cst);
+        ret.store = ((AtomicGCStateWhole*)&State.store)->load(std::memory_order_seq_cst);
         return ret;
     }
 
@@ -395,6 +399,7 @@ namespace GC {
         case PhaseEnum::NOT_MUTATING:
             return;
         case PhaseEnum::COLLECTING:
+        {
             bool success = false;
             do {
                 to.state = gc.state;
@@ -413,8 +418,9 @@ namespace GC {
                 to = get_state();
             }
             return;
-
+        }
         case PhaseEnum::RESTORING_SNAPSHOT:
+        {
             bool success = false;
             do {
                 to.state = gc.state;
@@ -433,7 +439,9 @@ namespace GC {
                 to = get_state();
             }
             return;
+        }
         case PhaseEnum::NOT_COLLECTING:
+        {
             bool success = false;
             do {
                 to.state = gc.state;
@@ -451,6 +459,7 @@ namespace GC {
                 to = get_state();
             }
             break;
+        }
         }
     }
 
@@ -485,43 +494,9 @@ namespace GC {
             ScanListsByThread[MyThreadNumber] = s;
         }
         CombinedThread = false;
-        bool success = false;
-        StateStoreType gc = get_state();
-        StateStoreType to;
-        do {
-            to.state = gc.state;
-            if (gc.state.phase == PhaseEnum::COLLECTING) {
-                SetThreadState(PhaseEnum::COLLECTING);
-                to.state.threads_in_collection++;
-            }
-            else
-            {
-                SetThreadState(PhaseEnum::NOT_COLLECTING);
-                to.state.threads_out_of_collection++;
-            }
-            success = compare_set_state(&gc, to);
-        } while (!success);
-        NotMutatingCount = 0;
-        if (to.state.phase == PhaseEnum::COLLECTING) {
-            while (to.state.threads_out_of_collection > 0) {
-#ifdef _WIN32
-                SwitchToThread();
-#else
-                sched_yield();
-#endif 
-                to = get_state();
-            }
-        }
-        else {
-            while (to.state.threads_in_collection > 0) {
-#ifdef _WIN32
-                SwitchToThread();
-#else
-                sched_yield();
-#endif 
-                to = get_state();
-            }
-        }
+
+        NotMutatingCount = 1;
+        thread_enter_mutation();
     }
 
     void exit_thread()
@@ -599,7 +574,6 @@ namespace GC {
         StateStoreType to;
         StateStoreType gc = get_state();
         do {
-            StateStoreType to;
             to.state = gc.state;
             switch (gc.state.phase) {
             case  PhaseEnum::NOT_COLLECTING:
@@ -650,17 +624,12 @@ namespace GC {
         }
     }
 
-    struct LeaveMutationRAII
-    {
-        LeaveMutationRAII() { thread_leave_mutation(); }
-        ~LeaveMutationRAII() { thread_enter_mutation(); }
-    };
 
     void collect_thread()
     {
         for (;;) {
             if (0 != WaitForEvent(StartCollectionEvent)) return; //there was an error, get out of here
-            if (TriggerPoint * 2 < MaxTriggerPoint) TriggerPoint.store(TriggerPoint*2,std::memory_order_release);
+            //if (TriggerPoint * 2 < MaxTriggerPoint) TriggerPoint.store(TriggerPoint*2,std::memory_order_release);
             _start_collection();
             _end_collection_start_restore_snapshot();
             _end_sweep();

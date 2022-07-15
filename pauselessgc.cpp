@@ -2,17 +2,77 @@
 //
 
 #include <iostream>
+#include <random>
 
+#include "Collectable.h"
 
-#include "LockFreeFIFO.h"
-#include "GCState.h"
+class RandomCounted : public Collectable
+{
+public:
+    int points_at_me;
+    InstancePtr<RandomCounted> first;
+    InstancePtr<RandomCounted> second;
 
+    void set_first(RootPtr<RandomCounted> &o) {
+        if (nullptr != o.get()) ++o->points_at_me;
+        if (nullptr != first.get())--first->points_at_me;
+        first = o;
+    }
+    void set_second(RootPtr<RandomCounted> &o) {
+        if (nullptr != o.get()) ++o->points_at_me;
+        if (nullptr != second.get())--second->points_at_me;
+        first = o;
+    }
+    RandomCounted() :points_at_me(0) {}
+    ~RandomCounted()
+    {
+        if (0 == points_at_me) std::cout << "Correct delete\n";
+        else std::cout << "*** incorrect or cycle delete. Holds "<<points_at_me<<"\n";
+    }
+    int total_instance_vars() { return 2; }
+    InstancePtrBase* index_into_instance_vars(int num) {
+        switch (num) {
+        case 0: return &first;
+        case 1: return &second;
+        }
+    }
+    size_t my_size() { return sizeof(*this); }
+};
 
 
 int main()
 {
-
     std::cout << "Hello World!\n";
+    
+    GC::init();
+    GC::init_thread();
+
+
+    const int Testlen = 1000000;
+    RootPtr<RandomCounted> *bunch = new RootPtr<RandomCounted>[Testlen];
+    std::default_random_engine generator;
+    std::uniform_int_distribution<int> distribution(0, Testlen - 1);
+
+
+    for (int i = 0; i < Testlen; ++i)
+    {
+        GC::safe_point();
+        bunch[i] = cnew(RandomCounted);
+    }
+  //distribution(generator);  
+    for (;;) {
+        for (int i = 0; i < Testlen; ++i)
+        {
+            GC::safe_point();
+            bunch[i]->set_first(bunch[distribution(generator)]);
+            bunch[i]->set_second(bunch[distribution(generator)]);
+        }
+        for (int i = 0; i < Testlen >> 1; ++i)
+        {
+            GC::safe_point();
+            bunch[i] = cnew(RandomCounted);
+        }
+    }
 }
 
 // Run program: Ctrl + F5 or Debug > Start Without Debugging menu

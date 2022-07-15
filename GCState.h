@@ -34,8 +34,8 @@
 #endif
 #include "LockFreeFIFO.h"
 
-#define cnew(A) GC::log_alloc(new A)
-#define cnew_array(A,N) ([&]{ auto _NfjkasjdflN_ = N; auto * _AskdlfA_=new A[_NfjkasjdflN_];  GC::log_array_alloc(sizeof(_AskdlfA_[0]),_NfjkasjdflN_); return _AskdlfA_; })()
+#define cnew(A) ([&]{ auto * _AskdlfA_=new A;  GC::log_alloc(_AskdlfA_->my_size()); return _AskdlfA_; })()
+#define cnew_array(A,N) ([&]{ auto _NfjkasjdflN_ = N; auto _AskdlfA_=new A[_NfjkasjdflN_];  GC::log_array_alloc(_AskdlfA_[0]->my_size(),_NfjkasjdflN_); return _AskdlfA_; })()
 
 namespace GC {
 
@@ -56,11 +56,11 @@ namespace GC {
     {
         dest->m128i_u64[0] = (uint64_t)v;
     }
-    inline void* load(SnapPtr* dest)
+    inline void* load(const SnapPtr* dest)
     {
         return (void*)dest->m128i_u64[0];
     }
-    inline void* load_snapshot(SnapPtr* dest)
+    inline void* load_snapshot(const SnapPtr* dest)
     {
         return (void*)dest->m128i_u64[1];
     }
@@ -74,13 +74,13 @@ namespace GC {
     {
         return _InterlockedCompareExchange128(&dest->m128i_i64[0], src.m128i_i64[1], src.m128i_i64[0], &expected->m128i_i64[0]);
     }
-    void fast_restore(SnapPtr* source)
+    inline void fast_restore(SnapPtr* source)
     {
         SnapPtr temp = _mm_load_si128(source);
         if (temp.m128i_i64[0] != temp.m128i_i64[1])temp.m128i_i64[1] = temp.m128i_i64[0];
 
     }
-    void restore(SnapPtr* source)
+    inline void restore(SnapPtr* source)
     {
         SnapPtr temp = _mm_load_si128(source);;
         do {
