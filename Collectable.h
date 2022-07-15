@@ -1,6 +1,8 @@
 #pragma once
 #include "GCState.h"
-
+#define ENSURE_THROW(cond, exception)	\
+	do { int __afx_condVal=!!(cond); assert(__afx_condVal); if (!(__afx_condVal)){exception;} } while (false)
+#define ENSURE(cond)		ENSURE_THROW(cond, throw std::runtime_error(#cond " failed") )
 
 enum _before_ { _BEFORE_, _END_ };
 enum _after_ { _AFTER_, _START_ };
@@ -34,7 +36,12 @@ public:
         CircularDoubleList* prev;
     public:
         iterator(CircularDoubleList& c) :center(&c), next(c.next), prev(c.prev) {}
-        iterator& remove() { delete center; return *this; }
+        iterator& remove() { 
+            center->fake_delete();
+            //delete center; 
+        
+            return *this; 
+        }
         CircularDoubleList& operator*() { return *center; }
         bool operator ++() { center = next; prev = center->prev; next = center->next;  return !center->sentinel(); }
 
@@ -43,10 +50,12 @@ public:
         operator bool() { return !center->sentinel(); }
         bool operator !() { return center->sentinel(); }
     };
+    virtual void fake_delete() = 0;
     iterator iterate() { return iterator(*this); }
     bool sentinel() const { return is_sentinel; }
 
     virtual ~CircularDoubleList() { next->prev = prev; prev->next = next;}
+    void disconnect() { next->prev = prev; prev->next = next; }
     CircularDoubleList(_sentinel_) :prev(this), next(this), is_sentinel(true){}
     CircularDoubleList(_before_, CircularDoubleList* e) :prev(e->prev), next(e), is_sentinel(false)
     {
@@ -151,9 +160,13 @@ namespace GC {
 struct RootLetterBase : public CircularDoubleList
 {
     bool owned;
-    virtual GC::SnapPtr* double_ptr() { return nullptr; }
+    bool deleted;
 
-    RootLetterBase(_sentinel_): CircularDoubleList(_SENTINEL_),owned(true) {  }
+    virtual GC::SnapPtr* double_ptr() { return nullptr; }
+    void fake_delete() { deleted = true; disconnect(); }
+    void memtest() { ENSURE(!deleted); }
+
+    RootLetterBase(_sentinel_): CircularDoubleList(_SENTINEL_),owned(true),deleted(false) {  }
     RootLetterBase();
     virtual void mark() {}
     virtual ~RootLetterBase()
@@ -161,17 +174,16 @@ struct RootLetterBase : public CircularDoubleList
     }
 };
 
-inline RootLetterBase::RootLetterBase():CircularDoubleList(_START_,GC::ScanListsByThread[GC::MyThreadNumber]->roots[GC::ActiveIndex]),owned(true)
+inline RootLetterBase::RootLetterBase():CircularDoubleList(_START_,GC::ScanListsByThread[GC::MyThreadNumber]->roots[GC::ActiveIndex]),owned(true),deleted(false)
 {
-
 }
 
 template <typename T>
 struct RootLetter : public RootLetterBase
 {
     InstancePtr<T> value;
-    virtual GC::SnapPtr* double_ptr() { return &value.value; }
-    virtual void mark() { if (value.get_collectable()!=nullptr) value->mark(); }
+    virtual GC::SnapPtr* double_ptr() { memtest(); return &value.value; }
+    virtual void mark() { memtest(); if (value.get_collectable() != nullptr) value->mark(); }
 
     RootLetter() {}
     RootLetter(T *v) :value(v){}
@@ -184,60 +196,94 @@ struct RootPtr
 
     void operator = (T* o)
     {
+        var->memtest();
         var->value.store(o);
     }
 
     template <typename Y>
     void operator = (const RootPtr<Y>& v)
     {
+        v->memtest();
+        var->memtest();
         var->value.store(v.var->value.get());
     }
 
     template <typename Y>
     void operator = (const InstancePtr<Y>& v)
     {
+        v->memtest();
+        var->memtest();
         var->value.store(v.get());
     }
 
-    T *get() { return var->value.get(); }
-    T *operator -> () { return var->value.get(); }
+    T *get() {
+        var->memtest();
+        return var->value.get(); }
+    T *operator -> () {
+        var->memtest();
+        return var->value.get(); }
     template <typename Y>
-    RootPtr(Y* v) :var(new RootLetter<T>(v)) {}
+    RootPtr(Y* v) :var(new RootLetter<T>(v)) {
+        GC::log_alloc(sizeof(*var));
+    }
+
+    RootPtr(RootPtr<T>&& v) = delete;
+
+    RootPtr(const RootPtr<T>& v) :var(new RootLetter<T>(v.var->value.get())) {
+        v.var->memtest();
+        var->memtest();
+        GC::log_alloc(sizeof(*var));
+    }
+
     template <typename Y>
-    RootPtr (const RootPtr<Y>  &v) :var(new RootLetter<T>(v.var->value.get())){}
+    RootPtr (const RootPtr<Y>  &v) :var(new RootLetter<T>(v.var->value.get())){
+        v.var->memtest();
+        var->memtest();
+        GC::log_alloc(sizeof(*var));
+    }
     template <typename Y>
-    RootPtr (const InstancePtr<Y> &v) :var(new RootLetter<T>(v.get())) {}
-    RootPtr() :var(new RootLetter<T>){}
+    RootPtr (const InstancePtr<Y> &v) :var(new RootLetter<T>(v.get())) {
+        var->memtest();
+        GC::log_alloc(sizeof(*var));
+    }
+    RootPtr() :var(new RootLetter<T>){
+        GC::log_alloc(sizeof(*var));
+    }
     ~RootPtr() { var->owned = false; }
 };
 
 template< class T, class U >
 RootPtr<T> static_pointer_cast(const RootPtr<U>& v) noexcept
 {
+    v->memtest();
     return RootPtr<T>(static_cast<T*>(v.var->value.get()));
 }
 
 template< class T, class U >
 RootPtr<T> const_pointer_cast(const RootPtr<U>& v) noexcept
 {
+    v->memtest();
     return RootPtr<T>(const_cast<T*>(v.var->value.get()));
 }
 
 template< class T, class U >
 RootPtr<T> const_dynamic_cast(const RootPtr<U>& v) noexcept
 {
+    v->memtest();
     return RootPtr<T>(dynamic_cast<T*>(v.var->value.get()));
 }
 
 template< class T, class U >
 RootPtr<T> const_reinterpret_cast(const RootPtr<U>& v) noexcept
 {
+    v->memtest();
     return RootPtr<T>(reinterpret_cast<T*>(v.var->value.get()));
 }
 
 template<typename T>
 template<typename Y>
 InstancePtr<T>::InstancePtr(const RootPtr<Y>& v) {
+    v->memtest();
     double_ptr_store(v.var->value.get());
 }
 
@@ -263,6 +309,7 @@ protected:
     friend void GC::_end_collection_start_restore_snapshot();
     friend void GC::_do_finalize_snapshot();
 
+    bool deleted;
 
     //when not tracing contains self index
     //when tracing points back to where we came from or 0 if that was a root
@@ -274,15 +321,18 @@ protected:
     bool marked; //only one collection thread
     virtual ~Collectable() 
     {
-
+ 
     }
-    Collectable(_sentinel_) : CircularDoubleList(_SENTINEL_), back_ptr(nullptr) , marked(true){
+    Collectable(_sentinel_) : CircularDoubleList(_SENTINEL_), back_ptr(nullptr) , marked(true), deleted(false){
         
     }
 
 public:
+    void memtest() const { ENSURE(!deleted); }
+    void fake_delete() { deleted = true; disconnect();  }
     void mark()
     {
+        memtest();
         Collectable* n=nullptr;
         Collectable* c = this;
         if (!c->marked) {
@@ -318,7 +368,7 @@ public:
     virtual size_t my_size() = 0;
     virtual InstancePtrBase* index_into_instance_vars(int num) = 0;
 
-    Collectable() :CircularDoubleList(_START_, GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex]), back_ptr(nullptr), marked(false) {
+    Collectable() :CircularDoubleList(_START_, GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex]), back_ptr(nullptr), marked(false),deleted(false) {
         }
 
 };

@@ -13,12 +13,16 @@ public:
     InstancePtr<RandomCounted> first;
     InstancePtr<RandomCounted> second;
 
-    void set_first(RootPtr<RandomCounted> &o) {
+    void set_first(RootPtr<RandomCounted> o2, RootPtr<RandomCounted> &o) {
+        memtest();
+        assert(o.get() == o2.get());
         if (nullptr != o.get()) ++o->points_at_me;
         if (nullptr != first.get())--(first->points_at_me);
         first = o;
     }
-    void set_second(RootPtr<RandomCounted> &o) {
+    void set_second(RootPtr<RandomCounted> o2, RootPtr<RandomCounted>& o) {
+        memtest();
+        assert(o.get() == o2.get());
         if (nullptr != o.get()) ++o->points_at_me;
         if (nullptr != second.get())--second->points_at_me;
         second = o;
@@ -29,14 +33,19 @@ public:
 //        if (0 == points_at_me) std::cout << "Correct delete\n";
 //        else std::cout << "*** incorrect or cycle delete. Holds "<<points_at_me<<"\n";
     }
-    int total_instance_vars() { return 2; }
+    int total_instance_vars() {
+        memtest();
+        return 2; }
     InstancePtrBase* index_into_instance_vars(int num) {
+        memtest();
         switch (num) {
         case 0: return &first;
         case 1: return &second;
         }
     }
-    size_t my_size() { return sizeof(*this); }
+    size_t my_size() {
+        memtest();
+        return sizeof(*this); }
 };
 
 
@@ -64,8 +73,18 @@ int main()
         for (int i = 0; i < Testlen; ++i)
         {
             GC::safe_point();
-            bunch[i]->set_first(bunch[distribution(generator)]);
-            bunch[i]->set_second(bunch[distribution(generator)]);
+            {
+                int j = distribution(generator);
+                assert(j >= 0);
+                assert(j < Testlen);
+                bunch[i]->set_first(bunch[j], bunch[j]);
+            }
+            {
+                int j = distribution(generator);
+                assert(j >= 0);
+                assert(j < Testlen);
+                bunch[i]->set_second(bunch[j], bunch[j]);
+            }
         }
         for (int i = 0; i < Testlen>>1; ++i)
         {

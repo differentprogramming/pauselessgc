@@ -161,7 +161,7 @@ namespace GC {
         }
         StartCollectionEvent = CreateEvent();
         CollectionThread = std::thread(collect_thread);
-        TriggerPoint = 200000000;
+        TriggerPoint = 300000000;
     }
 
     /*
@@ -189,22 +189,30 @@ namespace GC {
             }
 
         }
+        int cr = 0, rr = 0;
         //sweep
         for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
             if (nullptr == ScanListsByThread[i]) continue;
             auto itc = ScanListsByThread[i]->collectables[(ActiveIndex ^ 1)]->iterate();
 
             while (++itc) {
-                if (!static_cast<Collectable*>(&*itc)->marked) itc.remove();
+                if (!static_cast<Collectable*>(&*itc)->marked) {
+                    itc.remove();
+                    ++cr;
+                }
                 else static_cast<Collectable*>(&*itc)->marked = false;
             }
 
             itc = ScanListsByThread[i]->roots[(ActiveIndex ^ 1)]->iterate();
             while (++itc) {
-                if (!static_cast<RootLetterBase*>(&*itc)->owned) itc.remove();
+                if (!static_cast<RootLetterBase*>(&*itc)->owned) {
+                    itc.remove();
+                    ++rr;
+                }
             }
 
         }
+        std::cout << rr << " roots removed " << cr << " objects removed\n";
     }
 
 
@@ -263,9 +271,6 @@ namespace GC {
         } while(!compare_set_state(&gc, to));
 
         while (true) {
-            if (!one_shot && to.state.threads_in_collection != 0) {
-                one_shot = true;
-            }
             if (to.state.threads_out_of_collection == 1) {
                 if (!one_shot) ActiveIndex ^= 1;
                 one_shot = true;
