@@ -23,7 +23,7 @@ class CircularDoubleList
     CircularDoubleList* prev;
     CircularDoubleList* next;
     bool is_sentinel;
-
+    uint8_t to_remove;
 public:
 
     //doesn't conform to a standard iterator, though I suppose I could make it
@@ -42,8 +42,14 @@ public:
         iterator& remove() { 
             //center->fake_delete();
             delete center; 
-        
             return *this; 
+        }
+        iterator& half_remove(uint8_t col_num) {
+            if (!center->sentinel() && col_num==reinterpret_cast<std::atomic_bool *>(&center->to_remove)->exchange(col_num)) {
+                delete center;
+            }
+
+            return *this;
         }
         CircularDoubleList& operator*() { return *center; }
         bool operator ++() { center = next; prev = center->prev; next = center->next;  return !center->sentinel(); }
@@ -59,12 +65,12 @@ public:
 
     virtual ~CircularDoubleList() { next->prev = prev; prev->next = next;}
     void disconnect() { next->prev = prev; prev->next = next; }
-    CircularDoubleList(_sentinel_) :prev(this), next(this), is_sentinel(true){}
-    CircularDoubleList(_before_, CircularDoubleList* e) :prev(e->prev), next(e), is_sentinel(false)
+    CircularDoubleList(_sentinel_) :prev(this), next(this), is_sentinel(true), to_remove(0) {}
+    CircularDoubleList(_before_, CircularDoubleList* e) :prev(e->prev), next(e), is_sentinel(false), to_remove(0)
     {
         next->prev = prev->next = this;
     }
-    CircularDoubleList(_after_, CircularDoubleList* e) :prev(e), next(e->next),  is_sentinel(false)
+    CircularDoubleList(_after_, CircularDoubleList* e) :prev(e), next(e->next),  is_sentinel(false), to_remove(0)
     {
         next->prev = prev->next = this;
     }
@@ -191,9 +197,10 @@ template <typename T>
 struct RootLetter : public RootLetterBase
 {
     InstancePtr<T> value;
-    virtual GC::SnapPtr* double_ptr() { memtest(); return &value.value; }
+    virtual GC::SnapPtr* double_ptr() { //memtest(); 
+    return &value.value; }
     virtual void mark() { 
-        memtest();
+        //memtest();
         Collectable* c = value.get_collectable();
         if (c != nullptr) 
             c->mark(); }
@@ -211,31 +218,31 @@ struct RootPtr
 
     void operator = (T* o)
     {
-        var->memtest();
+        //var->memtest();
         var->value.store(o);
     }
 
     template <typename Y>
     void operator = (const RootPtr<Y>& v)
     {
-        v->memtest();
-        var->memtest();
+        //v->memtest();
+        //var->memtest();
         var->value.store(v.var->value.get());
     }
 
     template <typename Y>
     void operator = (const InstancePtr<Y>& v)
     {
-        v->memtest();
-        var->memtest();
+        //v->memtest();
+        //var->memtest();
         var->value.store(v.get());
     }
 
     T *get() {
-        var->memtest();
+        //var->memtest();
         return var->value.get(); }
     T *operator -> () {
-        var->memtest();
+        //var->memtest();
         return var->value.get(); }
     template <typename Y>
     RootPtr(Y* v) :var(new RootLetter<T>(v)) {
@@ -245,20 +252,20 @@ struct RootPtr
     RootPtr(RootPtr<T>&& v) = delete;
 
     RootPtr(const RootPtr<T>& v) :var(new RootLetter<T>(v.var->value.get())) {
-        v.var->memtest();
-        var->memtest();
+        //v.var->memtest();
+        //var->memtest();
         GC::log_alloc(sizeof(*var));
     }
 
     template <typename Y>
     RootPtr (const RootPtr<Y>  &v) :var(new RootLetter<T>(v.var->value.get())){
-        v.var->memtest();
-        var->memtest();
+        //v.var->memtest();
+        //var->memtest();
         GC::log_alloc(sizeof(*var));
     }
     template <typename Y>
     RootPtr (const InstancePtr<Y> &v) :var(new RootLetter<T>(v.get())) {
-        var->memtest();
+        //var->memtest();
         GC::log_alloc(sizeof(*var));
     }
     RootPtr() :var(new RootLetter<T>){
@@ -270,35 +277,35 @@ struct RootPtr
 template< class T, class U >
 RootPtr<T> static_pointer_cast(const RootPtr<U>& v) noexcept
 {
-    v->memtest();
+    //v->memtest();
     return RootPtr<T>(static_cast<T*>(v.var->value.get()));
 }
 
 template< class T, class U >
 RootPtr<T> const_pointer_cast(const RootPtr<U>& v) noexcept
 {
-    v->memtest();
+    //v->memtest();
     return RootPtr<T>(const_cast<T*>(v.var->value.get()));
 }
 
 template< class T, class U >
 RootPtr<T> const_dynamic_cast(const RootPtr<U>& v) noexcept
 {
-    v->memtest();
+    //v->memtest();
     return RootPtr<T>(dynamic_cast<T*>(v.var->value.get()));
 }
 
 template< class T, class U >
 RootPtr<T> const_reinterpret_cast(const RootPtr<U>& v) noexcept
 {
-    v->memtest();
+    //v->memtest();
     return RootPtr<T>(reinterpret_cast<T*>(v.var->value.get()));
 }
 
 template<typename T>
 template<typename Y>
 InstancePtr<T>::InstancePtr(const RootPtr<Y>& v) {
-    v->memtest();
+    //v->memtest();
     double_ptr_store(v.var->value.get());
 }
 
@@ -316,6 +323,8 @@ namespace GC {
     void _do_finalize_snapshot();
 }
 
+#define ONE_COLLECT_THREAD
+
 class Collectable: public CircularDoubleList {
 protected:
     friend void GC::merge_collected();
@@ -332,8 +341,11 @@ protected:
     Collectable* back_ptr;
 
     uint32_t back_ptr_from_counter;//came from nth snapshot ptr
-    //std::atomic_bool marked;
+#ifdef ONE_COLLECT_THREAD
     bool marked; //only one collection thread
+#else
+    std::atomic_bool marked;
+#endif
     virtual ~Collectable() 
     {
  
@@ -355,24 +367,40 @@ public:
         deleted = true; disconnect();  }
     void mark()
     {
-        memtest();
+        //memtest();
         Collectable* n=nullptr;
         Collectable* c = this;
-        if (deleted) std::cout << '!';
-        if (!c->marked) {
-            c->marked = true;
+        //if (deleted) std::cout << '!';
+        if (marked) return;
+#ifdef ONE_COLLECT_THREAD
+        marked = true;
+        {
+#else
+        bool got_it = marked.exchange(true);
+        if (!got_it) {
+#endif
             int t = total_instance_vars() - 1;
             for (;;) {
                 if (t >= 0) {
                     n = c->index_into_instance_vars(t)->get_collectable();
-                    if (n != nullptr && n->deleted) std::cout << '*';
-                    if (n != nullptr && !n->marked) {
-                        n->marked = true;
-                        n->back_ptr_from_counter = t;
-                        n->back_ptr = c;
-                        c = n;
-                        t = c->total_instance_vars() - 1;
-                        continue;
+                    if (n != nullptr) {
+                        if (n->deleted) std::cout << '*';
+
+                        if (!n->marked) {
+#ifdef ONE_COLLECT_THREAD
+                            n->marked = true;
+                            {
+#else
+                            got_it = marked.exchange(true);
+                            if (!got_it) {
+#endif
+                                n->back_ptr_from_counter = t;
+                                n->back_ptr = c;
+                                c = n;
+                                t = c->total_instance_vars() - 1;
+                                continue;
+                            }
+                        }
                     }
                     --t;
                 }

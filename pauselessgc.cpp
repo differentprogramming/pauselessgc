@@ -17,7 +17,7 @@ public:
     InstancePtr<RandomCounted> second;
 
     void set_first(RootPtr<RandomCounted> o2, RootPtr<RandomCounted> &o) {
-        memtest();
+        //memtest();
         assert(o2.var->owned);
         assert(o.get() == o2.get());
         if (nullptr != o.get()) ++o->points_at_me;
@@ -25,7 +25,7 @@ public:
         first = o;
     }
     void set_second(RootPtr<RandomCounted> o2, RootPtr<RandomCounted>& o) {
-        memtest();
+        //memtest();
         assert(o2.var->owned);
         assert(o.get() == o2.get());
         if (nullptr != o.get()) ++o->points_at_me;
@@ -39,33 +39,29 @@ public:
 //        else std::cout << "*** incorrect or cycle delete. Holds "<<points_at_me<<"\n";
     }
     int total_instance_vars() {
-        memtest();
+        //memtest();
         return 2; }
     InstancePtrBase* index_into_instance_vars(int num) {
-        memtest();
+        //memtest();
         switch (num) {
         case 0: return &first;
         case 1: return &second;
         }
     }
     size_t my_size() {
-        memtest();
+        //memtest();
         return sizeof(*this); }
 };
 
+const int Testlen = 1000000;
 
-int main()
+void mutator_thread()
 {
-    std::cout << "Hello World!\n";
+    if (!GC::CombinedThread)GC::init_thread();
     
-    GC::init();
-    GC::init_thread();
-
-
-    const int Testlen = 100000;
-    RootPtr<RandomCounted> *bunch = new RootPtr<RandomCounted>[Testlen];
-    std::default_random_engine generator;
-    std::uniform_int_distribution<int> distribution(0, Testlen - 1);
+    thread_local RootPtr<RandomCounted>* bunch = new RootPtr<RandomCounted>[Testlen];
+    thread_local  std::default_random_engine generator;
+    thread_local std::uniform_int_distribution<int> distribution(0, Testlen - 1);
 
 
     for (int i = 0; i < Testlen; ++i)
@@ -73,9 +69,9 @@ int main()
         GC::safe_point();
         bunch[i] = cnew(RandomCounted);
     }
-  //distribution(generator);  
+    //distribution(generator);  
     for (;;) {
-        GC::safe_point();
+        //GC::safe_point();
         for (int i = 0; i < Testlen; ++i)
         {
             GC::safe_point();
@@ -101,7 +97,7 @@ int main()
             }
         }
 
-        for (int i = 0; i < Testlen>>1; ++i)
+        for (int i = 0; i < Testlen >> 1; ++i)
         {
             GC::safe_point();
             bunch[i] = cnew(RandomCounted);
@@ -109,6 +105,17 @@ int main()
             assert(!bunch[i]->deleted);
         }
     }
+
+}
+
+int main()
+{
+    std::cout << "Hello World!\n";
+    
+    GC::init();
+
+   //auto m2 = std::thread(mutator_thread);
+    mutator_thread();
 }
 
 // Run program: Ctrl + F5 or Debug > Start Without Debugging menu

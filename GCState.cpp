@@ -64,15 +64,18 @@ namespace GC {
     thread_local int AggregateLogAlloc;
     thread_local int AggregateArrayLogAlloc;
 
+    bool single_thread_event = false;
 
     thread_local void (*write_barrier)(SnapPtr*, void*);
 
     thread_local PhaseEnum ThreadState;
     thread_local int NotMutatingCount;
     thread_local int MyThreadNumber;
-    thread_local bool CombinedThread;
+    thread_local bool CombinedThread=false;
     neosmart_event_t StartCollectionEvent;
     std::thread CollectionThread;
+
+    void one_collect();
 
     void log_alloc(size_t a)
     {
@@ -82,7 +85,10 @@ namespace GC {
             Allocated += ThreadAllocated;
             ThreadAllocated = 0;
             if (Allocated > TriggerPoint) {
-                if (Allocated.exchange(0) > TriggerPoint) SetEvent(StartCollectionEvent);
+                if (Allocated.exchange(0) > TriggerPoint) {
+                    if (CombinedThread) single_thread_event = true;
+                    else SetEvent(StartCollectionEvent);
+                }
             }
         }
     }
@@ -94,7 +100,10 @@ namespace GC {
             Allocated += ThreadAllocated;
             ThreadAllocated = 0;
             if (Allocated > TriggerPoint) {
-                if (Allocated.exchange(0) > TriggerPoint) SetEvent(StartCollectionEvent);
+                if (Allocated.exchange(0) > TriggerPoint) {
+                    if (CombinedThread) single_thread_event = true;
+                    else SetEvent(StartCollectionEvent);
+                }
             }
         }
     }
@@ -148,7 +157,7 @@ namespace GC {
 
     void collect_thread();
 
-    void init()
+    void init(bool combine_thread)
     {
         State.state.threads_not_mutating = 0;
         State.state.threads_in_sweep = 0;
@@ -161,9 +170,14 @@ namespace GC {
             ScanListsByThread[i] = nullptr;
             ThreadSlots[i] = false;
         }
-        StartCollectionEvent = CreateEvent();
-        CollectionThread = std::thread(collect_thread);
         TriggerPoint = 300000000;
+        if (!combine_thread) {
+            StartCollectionEvent = CreateEvent();
+            CollectionThread = std::thread(collect_thread);
+        }
+        else {
+            init_thread(true);
+        }
     }
 
     /*
@@ -179,6 +193,7 @@ namespace GC {
         return true
     
     */
+
     void _do_collection() 
     {
         int cr = 0, rr = 0;
@@ -386,7 +401,12 @@ namespace GC {
     //
     void safe_point()
     {
-        if (CombinedThread) return;
+        if (CombinedThread) {
+            if (single_thread_event || WaitForEvent(StartCollectionEvent,0)==0) {
+                single_thread_event = false;
+                one_collect();
+            }
+        }
         StateStoreType gc = get_state();
         StateStoreType to;
         if (ThreadState == gc.state.phase) return;
@@ -459,7 +479,7 @@ namespace GC {
         }
     }
 
-    void init_thread()
+    void init_thread(bool combine_thread)
     {
         MyThreadNumber = -1;
         do {
@@ -489,7 +509,7 @@ namespace GC {
             }
             ScanListsByThread[MyThreadNumber] = s;
         }
-        CombinedThread = false;
+        CombinedThread = combine_thread;
 
         NotMutatingCount = 1;
         thread_enter_mutation(true);
@@ -583,9 +603,14 @@ namespace GC {
             }
 
             if (!from_init_thread) --to.state.threads_not_mutating;
-            success = compare_set_state(&gc, to);
+            if (from_init_thread && CombinedThread) {
+                //State.store = to.store;
+                success = true;
+            }
+            else success = compare_set_state(&gc, to);
         } while (!success);
         SetThreadState(to.state.phase);
+        if (CombinedThread) return;
         switch (to.state.phase)
         {
         case  PhaseEnum::NOT_COLLECTING:
@@ -620,19 +645,24 @@ namespace GC {
         }
     }
 
+    void one_collect()
+    {
+        std::cout << "starting collection\n";
+        //if (TriggerPoint * 2 < MaxTriggerPoint) TriggerPoint.store(TriggerPoint*2,std::memory_order_release);
+        _start_collection();
+        std::cout << "starting restore snapshot\n";
+        _end_collection_start_restore_snapshot();
+        std::cout << "starting finalize snapshot\n";
+        _end_sweep();
+        std::cout << "end collection\n";
+
+    }
 
     void collect_thread()
     {
         for (;;) {
-            if (0 != WaitForEvent(StartCollectionEvent)) return; //there was an error, get out of here
-            std::cout << "starting collection\n";
-            //if (TriggerPoint * 2 < MaxTriggerPoint) TriggerPoint.store(TriggerPoint*2,std::memory_order_release);
-            _start_collection();
-            std::cout << "starting restore snapshot\n";
-            _end_collection_start_restore_snapshot();
-            std::cout << "starting finalize snapshot\n";
-            _end_sweep();
-            std::cout << "end collection\n";
+           if (0 != WaitForEvent(StartCollectionEvent)) return; //there was an error, get out of here
+           one_collect();
         }
     }
 

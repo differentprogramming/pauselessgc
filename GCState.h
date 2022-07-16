@@ -128,11 +128,11 @@ namespace GC {
     extern thread_local PhaseEnum ThreadState;
     extern thread_local int NotMutatingCount;
     extern thread_local int MyThreadNumber;
-
+    extern thread_local bool CombinedThread;
 
     extern std::atomic_uint32_t ThreadsInGC;
 
-    void init();
+    void init(bool combine_thread=false);
     void _start_collection();
     //waits until no threads are collecting
     void _end_collection_start_sweep();
@@ -140,7 +140,7 @@ namespace GC {
     StateStoreType get_state();
     bool compare_set_state(StateStoreType* expected, StateStoreType to);
     void safe_point();
-    void init_thread();
+    void init_thread(bool combine_thread=false);
     void exit_thread();
     struct ThreadRAII
     {
