@@ -102,10 +102,12 @@ namespace GC {
 
     void regular_write_barrier(SnapPtr* dest, void* v) {
         assert(ThreadState != PhaseEnum::NOT_MUTATING);
+        assert(ThreadState != PhaseEnum::COLLECTING);
         double_ptr_store(dest, v);
     }
     void collecting_write_barrier(SnapPtr* dest, void* v) {
         assert(ThreadState != PhaseEnum::NOT_MUTATING);
+        assert(ThreadState == PhaseEnum::COLLECTING);
         single_ptr_store(dest, v);
     }
 
@@ -179,6 +181,7 @@ namespace GC {
     */
     void _do_collection() 
     {
+        int cr = 0, rr = 0;
         //mark
         for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
             if (nullptr == ScanListsByThread[i]) continue;
@@ -186,10 +189,13 @@ namespace GC {
 
             while (++it) {
                 static_cast<RootLetterBase*>(&*it)->mark();
+                if (!static_cast<RootLetterBase*>(&*it)->owned) {//special iterator lets you delete under it
+                    it.remove();
+                    ++rr;
+                }
             }
 
         }
-        int cr = 0, rr = 0;
         //sweep
         for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
             if (nullptr == ScanListsByThread[i]) continue;
@@ -201,14 +207,6 @@ namespace GC {
                     ++cr;
                 }
                 else static_cast<Collectable*>(&*itc)->marked = false;
-            }
-
-            itc = ScanListsByThread[i]->roots[(ActiveIndex ^ 1)]->iterate();
-            while (++itc) {
-                if (!static_cast<RootLetterBase*>(&*itc)->owned) {
-                    itc.remove();
-                    ++rr;
-                }
             }
 
         }
@@ -223,6 +221,7 @@ namespace GC {
             if (nullptr == ScanListsByThread[i]) continue;
             Collectable* snapshot_c = ScanListsByThread[i]->collectables[ActiveIndex];
             auto t = ScanListsByThread[i]->collectables[2]->iterate();
+            assert(t);
             while (t) {
                 for (int j = static_cast<Collectable*>(&*t)->total_instance_vars() - 1; j >= 0; --j) {
                     fast_restore(&(static_cast<Collectable*>(&*t)->index_into_instance_vars(j)->value));
@@ -230,6 +229,7 @@ namespace GC {
                 ++t;
             }            
             t = ScanListsByThread[i]->roots[2]->iterate();
+            assert(t);
             while (t) {
                 fast_restore(static_cast<RootLetterBase*>(&*t)->double_ptr());
                 ++t;
@@ -243,6 +243,7 @@ namespace GC {
             if (nullptr == ScanListsByThread[i]) continue;
             Collectable* snapshot_c = ScanListsByThread[i]->collectables[ActiveIndex];
             auto t = ScanListsByThread[i]->collectables[2]->iterate();
+            assert(t);
             while (t) {
                 for (int j = static_cast<Collectable*>(&*t)->total_instance_vars() - 1; j >= 0; --j) {
                     restore(&(static_cast<Collectable*>(&*t)->index_into_instance_vars(j)->value));
@@ -250,6 +251,7 @@ namespace GC {
                 ++t;
             }
             t = ScanListsByThread[i]->roots[2]->iterate();
+            assert(t);
             while (t) {
                 restore(static_cast<RootLetterBase*>(&*t)->double_ptr());
                 ++t;
@@ -270,11 +272,11 @@ namespace GC {
             to.state.phase = PhaseEnum::COLLECTING;
             to.state.threads_out_of_collection++;//stop everyone till I'm done
         } while(!compare_set_state(&gc, to));
-
         while (true) {
             if (to.state.threads_out_of_collection == 1) {
                 if (!one_shot) ActiveIndex ^= 1;
                 one_shot = true;
+                //std::this_thread::sleep_for(std::chrono::milliseconds(1000));
                 do {
                     to = gc;
                     if (!released) to.state.threads_out_of_collection--;//release them
@@ -306,9 +308,11 @@ namespace GC {
             to.state.threads_in_collection++;//stop everyone till I'm done
             to.state.phase = PhaseEnum::RESTORING_SNAPSHOT;
         } while (!compare_set_state(&gc, to));
+        bool one_shot = false;
         while (true) {
             if (to.state.threads_in_collection == 1) {
-                merge_collected();
+                if (!one_shot) merge_collected();
+                one_shot = true;
  
                 do {
                     to = gc;
@@ -343,7 +347,7 @@ namespace GC {
 
         while (true) {
             if (to.state.threads_in_sweep == 1) {
-                ActiveIndex ^= 1;
+                //ActiveIndex ^= 1;
                 do {
                     to = gc;
                     if (!released) to.state.threads_in_sweep--;//release them

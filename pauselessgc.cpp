@@ -6,25 +6,27 @@
 
 #include "Collectable.h"
 
-static int identity_counter = 0;
+static int64_t identity_counter = 0;
 
 class RandomCounted : public Collectable
 {
 public:
     int points_at_me;
-    int identity;
+    int64_t identity;
     InstancePtr<RandomCounted> first;
     InstancePtr<RandomCounted> second;
 
-    void set_first(RootPtr<RandomCounted> &o2, RootPtr<RandomCounted> &o) {
+    void set_first(RootPtr<RandomCounted> o2, RootPtr<RandomCounted> &o) {
         memtest();
+        assert(o2.var->owned);
         assert(o.get() == o2.get());
         if (nullptr != o.get()) ++o->points_at_me;
         if (nullptr != first.get())--(first->points_at_me);
         first = o;
     }
-    void set_second(RootPtr<RandomCounted> &o2, RootPtr<RandomCounted>& o) {
+    void set_second(RootPtr<RandomCounted> o2, RootPtr<RandomCounted>& o) {
         memtest();
+        assert(o2.var->owned);
         assert(o.get() == o2.get());
         if (nullptr != o.get()) ++o->points_at_me;
         if (nullptr != second.get())--second->points_at_me;
@@ -60,7 +62,7 @@ int main()
     GC::init_thread();
 
 
-    const int Testlen = 10000000;
+    const int Testlen = 100000;
     RootPtr<RandomCounted> *bunch = new RootPtr<RandomCounted>[Testlen];
     std::default_random_engine generator;
     std::uniform_int_distribution<int> distribution(0, Testlen - 1);
@@ -73,6 +75,7 @@ int main()
     }
   //distribution(generator);  
     for (;;) {
+        GC::safe_point();
         for (int i = 0; i < Testlen; ++i)
         {
             GC::safe_point();
@@ -80,19 +83,30 @@ int main()
                 int j = distribution(generator);
                 assert(j >= 0);
                 assert(j < Testlen);
+                //assert(!bunch[i]->deleted);
+                //assert(!bunch[j]->deleted);
                 bunch[i]->set_first(bunch[j], bunch[j]);
+                assert(bunch[i].var->owned);
+                assert(bunch[j].var->owned);
             }
             {
                 int j = distribution(generator);
                 assert(j >= 0);
                 assert(j < Testlen);
+                //assert(!bunch[i]->deleted);
+                //assert(!bunch[j]->deleted);
                 bunch[i]->set_second(bunch[j], bunch[j]);
+                assert(bunch[i].var->owned);
+                assert(bunch[j].var->owned);
             }
         }
+
         for (int i = 0; i < Testlen>>1; ++i)
         {
             GC::safe_point();
             bunch[i] = cnew(RandomCounted);
+            assert(bunch[i].var->owned);
+            assert(!bunch[i]->deleted);
         }
     }
 }

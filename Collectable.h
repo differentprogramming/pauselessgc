@@ -1,9 +1,11 @@
 #pragma once
 #include "GCState.h"
+#include <iostream>
+
 #define ENSURE_THROW(cond, exception)	\
 	do { int __afx_condVal=!!(cond); assert(__afx_condVal); if (!(__afx_condVal)){exception;} } while (false)
-#define ENSURE(cond)		ENSURE_THROW(cond, throw std::runtime_error(#cond " failed") )
-
+//#define ENSURE(cond)		ENSURE_THROW(cond, throw std::runtime_error(#cond " failed") )
+#define ENSURE(cond)
 enum _before_ { _BEFORE_, _END_ };
 enum _after_ { _AFTER_, _START_ };
 enum _sentinel_ { _SENTINEL_ };
@@ -35,10 +37,11 @@ public:
         CircularDoubleList* next;
         CircularDoubleList* prev;
     public:
+        iterator() {}
         iterator(CircularDoubleList& c) :center(&c), next(c.next), prev(c.prev) {}
         iterator& remove() { 
-            center->fake_delete();
-            //delete center; 
+            //center->fake_delete();
+            delete center; 
         
             return *this; 
         }
@@ -65,6 +68,9 @@ public:
     {
         next->prev = prev->next = this;
     }
+    
+    CircularDoubleList(CircularDoubleList&&) = delete;
+    CircularDoubleList() = delete;
 
     bool empty() { return next == prev; }
 };
@@ -162,13 +168,16 @@ struct RootLetterBase : public CircularDoubleList
     bool owned;
     bool deleted;
 
-    virtual GC::SnapPtr* double_ptr() { return nullptr; }
+    virtual GC::SnapPtr* double_ptr() { abort(); return nullptr; }
     void fake_delete() { deleted = true; disconnect(); }
-    void memtest() { ENSURE(!deleted); }
-
+    void memtest() { 
+        //ENSURE(!deleted); 
+        if (deleted) std::cout << '.';
+    }
+    RootLetterBase(RootLetterBase&&) = delete;
     RootLetterBase(_sentinel_): CircularDoubleList(_SENTINEL_),owned(true),deleted(false) {  }
     RootLetterBase();
-    virtual void mark() {}
+    virtual void mark() { abort(); }
     virtual ~RootLetterBase()
     {
     }
@@ -183,7 +192,13 @@ struct RootLetter : public RootLetterBase
 {
     InstancePtr<T> value;
     virtual GC::SnapPtr* double_ptr() { memtest(); return &value.value; }
-    virtual void mark() { memtest(); if (value.get_collectable() != nullptr) value->mark(); }
+    virtual void mark() { 
+        memtest();
+        Collectable* c = value.get_collectable();
+        if (c != nullptr) 
+            c->mark(); }
+
+    RootLetter(RootLetter&&) = delete;
 
     RootLetter() {}
     RootLetter(T *v) :value(v){}
@@ -308,9 +323,9 @@ protected:
     friend void GC::_do_restore_snapshot();
     friend void GC::_end_collection_start_restore_snapshot();
     friend void GC::_do_finalize_snapshot();
-
+public:
     bool deleted;
-
+protected:
     //when not tracing contains self index
     //when tracing points back to where we came from or 0 if that was a root
     //when in a free list points to the next free element as an unbiased index into this block
@@ -328,19 +343,29 @@ protected:
     }
 
 public:
-    void memtest() const { ENSURE(!deleted); }
-    void fake_delete() { deleted = true; disconnect();  }
+    void memtest() const { 
+        //ENSURE(!deleted); 
+        if (deleted) std::cout << ':';
+    }
+    void fake_delete() {
+        if (deleted) {
+            std::cout << '$';
+            return;
+        }
+        deleted = true; disconnect();  }
     void mark()
     {
         memtest();
         Collectable* n=nullptr;
         Collectable* c = this;
+        if (deleted) std::cout << '!';
         if (!c->marked) {
             c->marked = true;
             int t = total_instance_vars() - 1;
             for (;;) {
                 if (t >= 0) {
                     n = c->index_into_instance_vars(t)->get_collectable();
+                    if (n != nullptr && n->deleted) std::cout << '*';
                     if (n != nullptr && !n->marked) {
                         n->marked = true;
                         n->back_ptr_from_counter = t;
@@ -355,7 +380,6 @@ public:
                     if (c == this) return;
                     n = c;
                     c = c->back_ptr;
-                    n->back_ptr = nullptr;
                     t = n->back_ptr_from_counter - 1;
                 }
             }
@@ -367,6 +391,7 @@ public:
     virtual int total_instance_vars() = 0;
     virtual size_t my_size() = 0;
     virtual InstancePtrBase* index_into_instance_vars(int num) = 0;
+    Collectable(Collectable&&) = delete;
 
     Collectable() :CircularDoubleList(_START_, GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex]), back_ptr(nullptr), marked(false),deleted(false) {
         }
