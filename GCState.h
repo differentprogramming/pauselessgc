@@ -32,7 +32,7 @@
 #elif defined(__x86_64__)
 #include <x86intrin.h>
 #endif
-#include "LockFreeFIFO.h"
+//#include "LockFreeFIFO.h"
 
 #define cnew(A) ([&]{ auto * _AskdlfA_=new A;  GC::log_alloc(_AskdlfA_->my_size()); return _AskdlfA_; })()
 #define cnew_array(A,N) ([&]{ auto _NfjkasjdflN_ = N; auto _AskdlfA_=new A[_NfjkasjdflN_];  GC::log_array_alloc(_AskdlfA_[0]->my_size(),_NfjkasjdflN_); return _AskdlfA_; })()
@@ -131,7 +131,8 @@ namespace GC {
     extern thread_local bool CombinedThread;
 
     extern std::atomic_uint32_t ThreadsInGC;
-
+    
+    void exit_collect_thread();
     void init(bool combine_thread=false);
     void _start_collection();
     //waits until no threads are collecting
@@ -153,6 +154,12 @@ namespace GC {
     {
         LeaveMutationRAII() { thread_leave_mutation(); }
         ~LeaveMutationRAII() { thread_enter_mutation(); }
+    };
+
+    struct EnterMutationRAII
+    {
+        ~EnterMutationRAII() { thread_leave_mutation(); }
+        EnterMutationRAII() { thread_enter_mutation(); }
     };
 
 }

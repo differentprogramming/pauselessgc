@@ -70,7 +70,7 @@ void mutator_thread()
         bunch[i] = cnew(RandomCounted);
     }
     //distribution(generator);  
-    for (;;) {
+    for (int j=0;j<20;++j) {
         //GC::safe_point();
         for (int i = 0; i < Testlen; ++i)
         {
@@ -116,6 +116,7 @@ int main()
 
    //auto m2 = std::thread(mutator_thread);
     mutator_thread();
+    GC::exit_collect_thread();
 }
 
 // Run program: Ctrl + F5 or Debug > Start Without Debugging menu

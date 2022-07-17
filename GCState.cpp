@@ -57,6 +57,7 @@ namespace GC {
 
     StateStoreType State;
 
+    std::atomic_bool exit_program_flag;
     int64_t MaxTriggerPoint;
     std::atomic_int64_t TriggerPoint;
     std::atomic_int64_t Allocated;
@@ -180,6 +181,14 @@ namespace GC {
         }
     }
 
+    void exit_collect_thread()
+    {
+        exit_program_flag = true;
+        SetEvent(StartCollectionEvent);
+
+        CollectionThread.join();
+    }
+
     /*
     if ( nBlockUse == _CRT_BLOCK )
     return( TRUE );
@@ -203,6 +212,7 @@ namespace GC {
             auto it = ScanListsByThread[i]->roots[(ActiveIndex ^ 1)]->iterate();
 
             while (++it) {
+                if (exit_program_flag) return;
                 static_cast<RootLetterBase*>(&*it)->mark();
                 if (!static_cast<RootLetterBase*>(&*it)->owned) {//special iterator lets you delete under it
                     it.remove();
@@ -217,6 +227,7 @@ namespace GC {
             auto itc = ScanListsByThread[i]->collectables[(ActiveIndex ^ 1)]->iterate();
 
             while (++itc) {
+                if (exit_program_flag) return;
                 if (!static_cast<Collectable*>(&*itc)->marked) {
                     itc.remove();
                     ++cr;
@@ -225,19 +236,21 @@ namespace GC {
             }
 
         }
-        std::cout << rr << " roots removed " << cr << " objects removed\n";
+        //std::cout << rr << " roots removed " << cr << " objects removed\n";
     }
 
 
     void _do_restore_snapshot()
     {
 
+        if (CombinedThread && ThreadsInGC == 1) return;
         for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
             if (nullptr == ScanListsByThread[i]) continue;
             Collectable* snapshot_c = ScanListsByThread[i]->collectables[ActiveIndex];
             auto t = ScanListsByThread[i]->collectables[2]->iterate();
             assert(t);
             while (t) {
+                if (exit_program_flag) return;
                 for (int j = static_cast<Collectable*>(&*t)->total_instance_vars() - 1; j >= 0; --j) {
                     fast_restore(&(static_cast<Collectable*>(&*t)->index_into_instance_vars(j)->value));
                 }
@@ -246,6 +259,7 @@ namespace GC {
             t = ScanListsByThread[i]->roots[2]->iterate();
             assert(t);
             while (t) {
+                if (exit_program_flag) return;
                 fast_restore(static_cast<RootLetterBase*>(&*t)->double_ptr());
                 ++t;
             }
@@ -253,9 +267,11 @@ namespace GC {
     }
     void _do_finalize_snapshot()
     {
-        std::cout << "actually about to finalize snapshot \n";
+        //std::cout << "actually about to finalize snapshot \n";
+        if (CombinedThread && ThreadsInGC == 1) return;
         for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
             if (nullptr == ScanListsByThread[i]) continue;
+            if (exit_program_flag) return;
             Collectable* snapshot_c = ScanListsByThread[i]->collectables[ActiveIndex];
             auto t = ScanListsByThread[i]->collectables[2]->iterate();
             assert(t);
@@ -286,8 +302,10 @@ namespace GC {
             to = gc;
             to.state.phase = PhaseEnum::COLLECTING;
             to.state.threads_out_of_collection++;//stop everyone till I'm done
+            if (exit_program_flag) return;
         } while(!compare_set_state(&gc, to));
         while (true) {
+            if (exit_program_flag) return;
             if (to.state.threads_out_of_collection == 1) {
                 if (!one_shot) ActiveIndex ^= 1;
                 one_shot = true;
@@ -355,12 +373,14 @@ namespace GC {
         StateStoreType to;
         bool released = false;
         do {
+            if (exit_program_flag) return;
             to = gc;
             to.state.phase = PhaseEnum::NOT_COLLECTING;
             to.state.threads_in_sweep++;//stop everyone till I'm done
         } while (!compare_set_state(&gc, to));
 
         while (true) {
+            if (exit_program_flag) return;
             if (to.state.threads_in_sweep == 1) {
                 //ActiveIndex ^= 1;
                 do {
@@ -418,6 +438,7 @@ namespace GC {
         {
             bool success = false;
             do {
+                if (exit_program_flag) return;
                 to.state = gc.state;
                 to.state.threads_in_collection--;
                 to.state.threads_in_sweep++;
@@ -427,11 +448,13 @@ namespace GC {
             SetThreadState(PhaseEnum::RESTORING_SNAPSHOT);
             while (to.state.threads_in_collection > 0) {
 #ifdef _WIN32
+                if (exit_program_flag) return;
                 SwitchToThread();
 #else
                 sched_yield();
 #endif 
                 to = get_state();
+                if (exit_program_flag) return;
             }
             return;
         }
@@ -453,6 +476,7 @@ namespace GC {
                 sched_yield();
 #endif 
                 to = get_state();
+                if (exit_program_flag) return;
             }
             return;
         }
@@ -473,6 +497,7 @@ namespace GC {
                 sched_yield();
 #endif 
                 to = get_state();
+                if (exit_program_flag) return;
             }
             break;
         }
@@ -536,7 +561,7 @@ namespace GC {
             success = compare_set_state(&gc, to);
         } while (!success);
         ThreadSlots[MyThreadNumber] = false;
-        ThreadsInGC--;
+//        ThreadsInGC--;
     }
 
     struct ThreadGCRAII
@@ -621,6 +646,7 @@ namespace GC {
                 sched_yield();
 #endif 
                 to = get_state();
+                if (exit_program_flag) return;
             }
             break;
         case  PhaseEnum::COLLECTING:
@@ -631,6 +657,7 @@ namespace GC {
                 sched_yield();
 #endif 
                 to = get_state();
+                if (exit_program_flag) return;
             }
             break;
         case  PhaseEnum::RESTORING_SNAPSHOT:
@@ -641,27 +668,32 @@ namespace GC {
                 sched_yield();
 #endif 
                 to = get_state();
+                if (exit_program_flag) return;
             }
         }
     }
 
     void one_collect()
     {
-        std::cout << "starting collection\n";
+//        std::cout << "starting collection\n";
         //if (TriggerPoint * 2 < MaxTriggerPoint) TriggerPoint.store(TriggerPoint*2,std::memory_order_release);
         _start_collection();
-        std::cout << "starting restore snapshot\n";
+        if (exit_program_flag) return;
+        //        std::cout << "starting restore snapshot\n";
         _end_collection_start_restore_snapshot();
-        std::cout << "starting finalize snapshot\n";
+        if (exit_program_flag) return;
+        //        std::cout << "starting finalize snapshot\n";
         _end_sweep();
-        std::cout << "end collection\n";
+//        std::cout << "end collection\n";
 
     }
 
     void collect_thread()
     {
         for (;;) {
+            if (exit_program_flag) break;
            if (0 != WaitForEvent(StartCollectionEvent)) return; //there was an error, get out of here
+           if (exit_program_flag) break;
            one_collect();
         }
     }

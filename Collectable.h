@@ -2,10 +2,10 @@
 #include "GCState.h"
 #include <iostream>
 
-#define ENSURE_THROW(cond, exception)	\
+//#define ENSURE_THROW(cond, exception)	\
 	do { int __afx_condVal=!!(cond); assert(__afx_condVal); if (!(__afx_condVal)){exception;} } while (false)
 //#define ENSURE(cond)		ENSURE_THROW(cond, throw std::runtime_error(#cond " failed") )
-#define ENSURE(cond)
+//#define ENSURE(cond)
 enum _before_ { _BEFORE_, _END_ };
 enum _after_ { _AFTER_, _START_ };
 enum _sentinel_ { _SENTINEL_ };
@@ -23,7 +23,6 @@ class CircularDoubleList
     CircularDoubleList* prev;
     CircularDoubleList* next;
     bool is_sentinel;
-    uint8_t to_remove;
 public:
 
     //doesn't conform to a standard iterator, though I suppose I could make it
@@ -44,13 +43,7 @@ public:
             delete center; 
             return *this; 
         }
-        iterator& half_remove(uint8_t col_num) {
-            if (!center->sentinel() && col_num==reinterpret_cast<std::atomic_bool *>(&center->to_remove)->exchange(col_num)) {
-                delete center;
-            }
 
-            return *this;
-        }
         CircularDoubleList& operator*() { return *center; }
         bool operator ++() { center = next; prev = center->prev; next = center->next;  return !center->sentinel(); }
 
@@ -65,12 +58,12 @@ public:
 
     virtual ~CircularDoubleList() { next->prev = prev; prev->next = next;}
     void disconnect() { next->prev = prev; prev->next = next; }
-    CircularDoubleList(_sentinel_) :prev(this), next(this), is_sentinel(true), to_remove(0) {}
-    CircularDoubleList(_before_, CircularDoubleList* e) :prev(e->prev), next(e), is_sentinel(false), to_remove(0)
+    CircularDoubleList(_sentinel_) :prev(this), next(this), is_sentinel(true) {}
+    CircularDoubleList(_before_, CircularDoubleList* e) :prev(e->prev), next(e), is_sentinel(false)
     {
         next->prev = prev->next = this;
     }
-    CircularDoubleList(_after_, CircularDoubleList* e) :prev(e), next(e->next),  is_sentinel(false), to_remove(0)
+    CircularDoubleList(_after_, CircularDoubleList* e) :prev(e), next(e->next),  is_sentinel(false)
     {
         next->prev = prev->next = this;
     }
