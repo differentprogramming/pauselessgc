@@ -232,11 +232,14 @@ namespace GC {
                     itc.remove();
                     ++cr;
                 }
-                else static_cast<Collectable*>(&*itc)->marked = false;
+                else {
+                    static_cast<Collectable*>(&*itc)->marked = false;
+                    static_cast<Collectable*>(&*itc)->clean_after_collect();
+                }
             }
 
         }
-        //std::cout << rr << " roots removed " << cr << " objects removed\n";
+        std::cout << rr << " roots removed " << cr << " objects removed\n";
     }
 
 
@@ -675,16 +678,16 @@ namespace GC {
 
     void one_collect()
     {
-//        std::cout << "starting collection\n";
+        std::cout << "starting collection\n";
         //if (TriggerPoint * 2 < MaxTriggerPoint) TriggerPoint.store(TriggerPoint*2,std::memory_order_release);
         _start_collection();
         if (exit_program_flag) return;
-        //        std::cout << "starting restore snapshot\n";
+        std::cout << "starting restore snapshot\n";
         _end_collection_start_restore_snapshot();
         if (exit_program_flag) return;
-        //        std::cout << "starting finalize snapshot\n";
+        std::cout << "starting finalize snapshot\n";
         _end_sweep();
-//        std::cout << "end collection\n";
+        std::cout << "end collection\n";
 
     }
 
