@@ -145,13 +145,13 @@ namespace GC {
             Collectable* snapshot_c = ScanListsByThread[i]->collectables[(ActiveIndex^1)];
             merge_from_to(snapshot_c, active_c);
             //save the start before any new allocations
-            ScanListsByThread[i]->collectables[2]= static_cast<Collectable *>(ScanListsByThread[i]->collectables[ActiveIndex]->next);
+            ScanListsByThread[i]->collectables[2]= static_cast<Collectable *>(ScanListsByThread[i]->collectables[ActiveIndex]->circular_double_list_next);
             
             RootLetterBase* active_r = ScanListsByThread[i]->roots[ActiveIndex];
             RootLetterBase* snapshot_r = ScanListsByThread[i]->roots[(ActiveIndex ^ 1)];
             merge_from_to(snapshot_r, active_r);
 
-            ScanListsByThread[i]->roots[2] = static_cast<RootLetterBase*>(ScanListsByThread[i]->roots[ActiveIndex]->next);
+            ScanListsByThread[i]->roots[2] = static_cast<RootLetterBase*>(ScanListsByThread[i]->roots[ActiveIndex]->circular_double_list_next);
         }
  
     }
@@ -228,12 +228,12 @@ namespace GC {
 
             while (++itc) {
                 if (exit_program_flag) return;
-                if (!static_cast<Collectable*>(&*itc)->marked) {
+                if (!static_cast<Collectable*>(&*itc)->collectable_marked) {
                     itc.remove();
                     ++cr;
                 }
                 else {
-                    static_cast<Collectable*>(&*itc)->marked = false;
+                    static_cast<Collectable*>(&*itc)->collectable_marked = false;
                     static_cast<Collectable*>(&*itc)->clean_after_collect();
                 }
             }
@@ -532,7 +532,7 @@ namespace GC {
             ScanLists* s = new ScanLists;
 
             for (int i = 0; i < 2; ++i) {
-                s->collectables[i] = new CollectableSentinal();
+                s->collectables[i] = cnew (CollectableSentinal());
                 s->roots[i] = new RootLetterBase(_SENTINEL_);
             }
             ScanListsByThread[MyThreadNumber] = s;

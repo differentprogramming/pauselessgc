@@ -2,9 +2,10 @@
 //
 
 #include <iostream>
+#include <sstream>
 #include <random>
 
-#include "Collectable.h"
+#include "CollectableHash.h"
 
 static int64_t identity_counter = 0;
 
@@ -38,7 +39,7 @@ public:
 //        if (0 == points_at_me) std::cout << "Correct delete\n";
 //        else std::cout << "*** incorrect or cycle delete. Holds "<<points_at_me<<"\n";
     }
-    int total_instance_vars() {
+    int total_instance_vars() const {
         //memtest();
         return 2; }
     InstancePtrBase* index_into_instance_vars(int num) {
@@ -48,12 +49,19 @@ public:
         case 1: return &second;
         }
     }
-    size_t my_size() {
+    size_t my_size() const {
         //memtest();
         return sizeof(*this); }
 };
 
 const int Testlen = 100000;
+
+RootPtr<CollectableString> int_to_string(int a)
+{
+    std::stringstream ss;
+    ss << a;
+    return cnew(CollectableString(ss.str().c_str()));
+}
 
 void mutator_thread()
 {
@@ -63,53 +71,67 @@ void mutator_thread()
     thread_local  std::default_random_engine generator;
     thread_local std::uniform_int_distribution<int> distribution(0, Testlen - 1);
 
-    RootPtr<CollectableVector<RandomCounted> > vec= new CollectableVector<RandomCounted>();
+    RootPtr<CollectableHashTable<CollectableString,RandomCounted> > hash = cnew2template(CollectableHashTable<CollectableString, RandomCounted>());
+
+    RootPtr<CollectableVector<RandomCounted> > vec= cnew (CollectableVector<RandomCounted>());
     for (int k = 1; k <= 5; ++k) {
         vec->clear();
         for (int i = 0; i < Testlen; ++i)
         {
             GC::safe_point();
-            bunch[i] = cnew(RandomCounted(i));
+            RootPtr<CollectableString> index = int_to_string(i);
+
+            hash->insert_or_assign(index, cnew(RandomCounted(i)));
             int b = vec->size();
-            vec->push_front(bunch[i]);
+            vec->push_front(hash[index]);
             //assert(t);
-            int v = vec->size();
-            assert(v == i + 1);
-            assert(vec->at(0).get() == bunch[i].get());
+            //int v = vec->size();
+            //assert(v == i + 1);
+            //assert(vec[0].get() == bunch[i].get());
         }
         //distribution(generator);  
         for (int j = 0; j < 2; ++j) {
             //GC::safe_point();
             for (int i = 0; i < Testlen; ++i)
             {
+                RootPtr<CollectableString> ind = int_to_string(i);
                 GC::safe_point();
                 {
                     int j = distribution(generator);
-                    assert(j >= 0);
-                    assert(j < Testlen);
+                    RootPtr<CollectableString> jind = int_to_string(j);
+                    //assert(j >= 0);
+                    //assert(j < Testlen);
                     //assert(!bunch[i]->deleted);
                     //assert(!bunch[j]->deleted);
-                    bunch[i]->set_first(bunch[j], bunch[j]);
-                    assert(bunch[i].var->owned);
-                    assert(bunch[j].var->owned);
+                    RootPtr<RandomCounted> jrc = hash[jind];
+                    hash[ind]->set_first(jrc, jrc);
+                    //bunch[i]->set_first(bunch[j], bunch[j]);
+                    //assert(bunch[i].var->owned);
+                    //assert(bunch[j].var->owned);
                 }
                 {
                     int j = distribution(generator);
-                    assert(j >= 0);
-                    assert(j < Testlen);
+                    RootPtr<CollectableString> jind = int_to_string(j);
+                    RootPtr<RandomCounted> jrc = hash[jind];
+                    //assert(j >= 0);
+                    //assert(j < Testlen);
                     //assert(!bunch[i]->deleted);
                     //assert(!bunch[j]->deleted);
-                    bunch[i]->set_second(bunch[j], bunch[j]);
-                    assert(bunch[i].var->owned);
-                    assert(bunch[j].var->owned);
+                    //bunch[i]->set_second(bunch[j], bunch[j]);
+                    hash[ind]->set_second(jrc, jrc);
+                    //assert(bunch[i].var->owned);
+                    //assert(bunch[j].var->owned);
                 }
             }
 
             for (int i = 0; i < Testlen >> 1; ++i)
             {
                 GC::safe_point();
-                bunch[i] = cnew(RandomCounted(Testlen-i-1));
-                assert(bunch[i].var->owned);
+                RootPtr<CollectableString> index = int_to_string(Testlen - i - 1);
+
+                hash->insert_or_assign(index, cnew(RandomCounted(Testlen - i - 1)));
+                //bunch[i] = cnew(RandomCounted(Testlen-i-1));
+                //assert(bunch[i].var->owned);
                 //assert(!bunch[i]->deleted);
             }
         }

@@ -116,6 +116,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -140,16 +141,20 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Collectable.cpp" />
+    <ClCompile Include="CollectableHash.cpp" />
     <ClCompile Include="GCState.cpp" />
     <ClCompile Include="LockFreeFIFO.cpp" />
     <ClCompile Include="pauselessgc.cpp" />
     <ClCompile Include="pevents\pevents.cpp" />
+    <ClCompile Include="spooky.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Collectable.h" />
+    <ClInclude Include="CollectableHash.h" />
     <ClInclude Include="GCState.h" />
     <ClInclude Include="LockFreeFIFO.h" />
     <ClInclude Include="pevents\pevents.h" />
+    <ClInclude Include="spooky.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
