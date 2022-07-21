@@ -4,24 +4,14 @@
 
 
 /* A simple hash table with the following assumptions:
-1) they keys are strings up to length MAX_HASH_STRING_SIZE
-a) the keys handed to the routines are constants and it's not up to the routines to own or clean them up.
-b) strings will be copied into keys, and the Hash functions will manage that memory.
-2) The table length has to be a power of 2 and will grow as necessary to mostly avoid collisions
-3) the code relies on spooky hash
+* 
+1) the keys are any collectable type.  I added a hash function to collectables that defaults to being based on the address.  But I also added a string type.  All hashing is based on spookyhash.
+2) the value type should be a collectable or at least something that has the total_instance_vars() and index_into_instance_vars(int) methods.  They will all be stored in a single block and the whole thing collected at once.
+3) The table length has to be a power of 2 and will grow as necessary to mostly avoid collisions
 
-The hash table uses external lists for collisions but the table stays at least as big as twice the number of elements so there shouldn't be too many collisions.
-The elements of the hash table are not pointers they're embedded Entry structs, so not very much external calls to new and delete will be necessary.
-If you really want to avoid new and delete, then you can change the test at the end of HashInsert to expand earlier.
+The hash table uses linear probing and stays at least 4 times as big as the number of elements.  You can delete from this hash table, it handles that by marking elements "deleted" and not moving anything.
 
-The original C version was probably a bit faster on expand and delete because it assumed that memory can be zeroed and copied.
-This version uses constructors and destructors and std::move properly instead.
-By the way, you should define a move constructor for your type that releases ownership of memory, if it's complicated enough to hold some.
-It should also have an assignment operator.
  */
-
- /* for safety string operations should have a maximum size, they truncate after that. */
-#define MAX_HASH_STRING_SIZE 1051
 
 #define INITIAL_HASH_SIZE 1024
 
