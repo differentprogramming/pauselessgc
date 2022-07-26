@@ -186,7 +186,7 @@ namespace GC {
         exit_program_flag = true;
         SetEvent(StartCollectionEvent);
 
-        CollectionThread.join();
+        if (!CombinedThread) CollectionThread.join();
     }
 
     /*
@@ -213,7 +213,10 @@ namespace GC {
 
             while (++it) {
                 if (exit_program_flag) return;
-                static_cast<RootLetterBase*>(&*it)->mark();
+                if (static_cast<RootLetterBase*>(&*it)->was_owned) {
+                    static_cast<RootLetterBase*>(&*it)->mark();
+                    static_cast<RootLetterBase*>(&*it)->was_owned = static_cast<RootLetterBase*>(&*it)->owned;
+                }
                 if (!static_cast<RootLetterBase*>(&*it)->owned) {//special iterator lets you delete under it
                     it.remove();
                     ++rr;
@@ -228,7 +231,7 @@ namespace GC {
 
             while (++itc) {
                 if (exit_program_flag) return;
-                if (!static_cast<Collectable*>(&*itc)->collectable_marked) {
+                if (!static_cast<Collectable*>(&*itc)->collectable_marked && &*itc!= nullptr) {
                     itc.remove();
                     ++cr;
                 }
@@ -532,7 +535,8 @@ namespace GC {
             ScanLists* s = new ScanLists;
 
             for (int i = 0; i < 2; ++i) {
-                s->collectables[i] = cnew (CollectableSentinal());
+                s->collectables[i] = new CollectableSentinel();
+                s->collectables[i]->circular_double_list_is_sentinel = true;
                 s->roots[i] = new RootLetterBase(_SENTINEL_);
             }
             ScanListsByThread[MyThreadNumber] = s;
